@@ -1,10 +1,10 @@
 name: Build Android APK (Kivy + Buildozer)
 
 on:
-  workflow_dispatch: {}        # allows manual run from Actions
+  workflow_dispatch: {}
   push:
     tags:
-      - 'v*'                   # also runs if you push a tag like v0.1.0
+      - 'v*'
 
 jobs:
   build:
@@ -31,10 +31,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install cython buildozer
 
-      - name: Build debug APK
+      - name: Build debug APK (accept SDK licenses)
         run: |
-          # First run will download the Android SDK/NDK; can take 20–40 minutes
-          buildozer android debug
+          echo y | buildozer -v android debug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
