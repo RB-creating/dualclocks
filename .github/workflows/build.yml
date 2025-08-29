@@ -26,26 +26,33 @@ jobs:
             zip unzip build-essential libffi-dev libssl-dev \
             autoconf libtool pkg-config git openjdk-17-jdk
 
+      # ✅ NEW: Install Android SDK + stable Build-Tools + accept licenses
+      - name: Set up Android SDK (stable)
+        uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: latest
+          packages: |
+            platform-tools
+            platforms;android-34
+            build-tools;34.0.0
+          accept-licenses: true
+
+      # (Optional) show sdkmanager versions for sanity
+      - name: Show installed SDK packages
+        run: |
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --list | head -n 200 || true
+          ls -la $ANDROID_SDK_ROOT/build-tools || true
+
       - name: Install Buildozer & tools
         run: |
           python -m pip install --upgrade pip
           pip install cython buildozer
 
-      - name: Ensure Android Build-Tools + accept licenses (stable)
-        run: |
-          SDK="$HOME/.buildozer/android/platform/android-sdk"
-          SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
-          if [ -x "$SM" ]; then
-            yes | "$SM" --sdk_root="$SDK" \
-              "platform-tools" \
-              "platforms;android-34" \
-              "build-tools;34.0.0"
-            yes | "$SM" --licenses --sdk_root="$SDK"
-          else
-            echo "sdkmanager not present yet; Buildozer will download SDK on first run."
-          fi
-
       - name: Build debug APK (accept SDK licenses)
+        env:
+          # Ensure Buildozer uses the SDK we installed above
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+          ANDROIDSDK: /usr/local/lib/android/sdk
         run: |
           echo y | buildozer -v android debug
 
