@@ -31,6 +31,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install cython buildozer
 
+      - name: Ensure Android Build-Tools + accept licenses (stable)
+        run: |
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
+          SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SM" ]; then
+            yes | "$SM" --sdk_root="$SDK" \
+              "platform-tools" \
+              "platforms;android-34" \
+              "build-tools;34.0.0"
+            yes | "$SM" --licenses --sdk_root="$SDK"
+          else
+            echo "sdkmanager not present yet; Buildozer will download SDK on first run."
+          fi
+
       - name: Build debug APK (accept SDK licenses)
         run: |
           echo y | buildozer -v android debug
