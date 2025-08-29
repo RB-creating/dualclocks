@@ -1,0 +1,43 @@
+name: Build Android APK (Kivy + Buildozer)
+
+on:
+  workflow_dispatch: {}        # allows manual run from Actions
+  push:
+    tags:
+      - 'v*'                   # also runs if you push a tag like v0.1.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            zip unzip build-essential libffi-dev libssl-dev \
+            autoconf libtool pkg-config git openjdk-17-jdk
+
+      - name: Install Buildozer & tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install cython buildozer
+
+      - name: Build debug APK
+        run: |
+          # First run will download the Android SDK/NDK; can take 20–40 minutes
+          buildozer android debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-apk
+          path: bin/*.apk
