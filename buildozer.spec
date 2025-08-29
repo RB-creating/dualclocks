@@ -11,6 +11,12 @@ orientation = portrait
 fullscreen = 0
 android.archs = arm64-v8a
 android.allow_backup = False
+# Use stable, non-preview Android API (avoid preview build-tools)
+android.api = 34
+android.minapi = 23
+
+# Auto-accept Android SDK licenses (for CI)
+android.accept_sdk_license = True
 
 [buildozer]
 log_level = 2
