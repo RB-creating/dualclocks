@@ -13,13 +13,14 @@ android.archs = arm64-v8a
 android.allow_backup = False
 # Use stable, non-preview Android API (avoid preview build-tools)
 # Use stable, non-preview Android API (prevents preview build-tools)
+# --- Android configuration (stable & CI-safe) ---
 android.api = 34
 android.minapi = 23
 
-# Point Buildozer to the preinstalled SDK (we'll install it in the workflow)
+# Use the SDK we install in GitHub Actions (not Buildozer's private copy)
 android.sdk_path = /usr/local/lib/android/sdk
 
-# Auto-accept Android SDK licenses in CI
+# Auto-accept SDK licenses in CI
 android.accept_sdk_license = True
 
 [buildozer]
