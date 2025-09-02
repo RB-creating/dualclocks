@@ -4,7 +4,7 @@ package.name = dualclocks
 package.domain = org.example
 source.dir = .
 source.include_exts = py,kv,png,jpg,ttf,otf,wav,txt,md
-requirements = python3,kivy==2.3.1,pytz
+requirements = python3,kivy==2.3.1,pytz,tzdata
 version = 0.1.0
 android.numeric_version = 1
 orientation = landscape
