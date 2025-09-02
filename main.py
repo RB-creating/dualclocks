@@ -1,57 +1,52 @@
 # main.py
 from datetime import datetime
+from zoneinfo import ZoneInfo  # stdlib (Python 3.9+); pairs with 'tzdata' package
 
 from kivy.app import App
 from kivy.lang import Builder
-from kivy.properties import BooleanProperty, NumericProperty, StringProperty
+from kivy.properties import StringProperty
 from kivy.clock import Clock as KivyClock
 from kivy.uix.widget import Widget
 
 
 class AnalogClock(Widget):
     """
-    Simple analog clock drawn with canvas instructions.
-    - mode: 'local' or 'utc'
-    - label: text shown under the clock (e.g., 'Local', 'UTC')
-    - use_24: digital readout uses 24h if True, otherwise 12h
+    Simple analog clock drawn via canvas instructions.
+    - tzname: IANA time zone (e.g., 'America/Los_Angeles', 'Europe/London')
+    - label:  text shown under the clock (e.g., 'San Francisco', 'London')
     """
-    label = StringProperty("Local")
-    mode = StringProperty("local")          # 'local' | 'utc'
-    use_24 = BooleanProperty(True)
+    tzname = StringProperty("UTC")
+    label = StringProperty("Zone")
 
-    # Values used by the canvas and label (updated ~10x/sec)
-    hour = NumericProperty(0.0)             # 0..12 (analog hand)
-    minute = NumericProperty(0.0)           # 0..60
-    second = NumericProperty(0.0)           # 0..60
-    d_hour = NumericProperty(0)             # digital
-    d_min = NumericProperty(0)
-    d_sec = NumericProperty(0)
+    # Angle sources for the hands (updated ~10x/sec)
+    # We keep them as attributes so KV can bind to them.
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._tz = ZoneInfo(self.tzname)
 
-    _evt = None
+        # Update a little after KV is applied to ensure sizes are known
+        self._evt = KivyClock.schedule_interval(self._update_time, 0.1)
 
-    def on_kv_post(self, base_widget):
-        # Start updates after the widget is in the tree
-        if not self._evt:
-            self._evt = KivyClock.schedule_interval(self.update_time, 0.1)
+    def on_tzname(self, *_):
+        # If tzname changes, refresh the ZoneInfo
+        self._tz = ZoneInfo(self.tzname)
 
     def on_parent(self, *args):
-        # Stop updates if widget is removed
-        if self.parent is None and self._evt:
+        # Stop updates if removed from the tree
+        if self.parent is None and self._evt is not None:
             self._evt.cancel()
             self._evt = None
 
-    def update_time(self, dt):
-        now = datetime.utcnow() if self.mode == "utc" else datetime.now()
+    # values read by canvas (we store them on self to read in KV)
+    hour = 0.0
+    minute = 0.0
+    second = 0.0
 
-        # analog
+    def _update_time(self, dt):
+        now = datetime.now(self._tz)
         self.second = now.second + now.microsecond / 1e6
         self.minute = now.minute + self.second / 60.0
         self.hour = (now.hour % 12) + self.minute / 60.0
-
-        # digital
-        self.d_hour = now.hour if self.use_24 else (now.hour % 12 or 12)
-        self.d_min = now.minute
-        self.d_sec = now.second
 
 
 class DualClocksApp(App):
