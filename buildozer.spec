@@ -3,7 +3,7 @@ title = My Kivy App
 package.name = mykivyapp
 package.domain = org.example
 source.dir = .
-source.include_exts = py,kv,png,jpg,ttf,wav,txt,md
+source.include_exts = py,kv,png,jpg,ttf,otf,wav,txt,md
 requirements = python3,kivy==2.3.1,pytz
 version = 0.1
 android.numeric_version = 1
