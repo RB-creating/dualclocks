@@ -1,0 +1,138 @@
+#:kivy 2.3.0
+#:import dp kivy.metrics.dp
+
+<AnalogClock>:
+    size_hint: None, None
+    size: dp(220), dp(220)
+
+    # NOTE: We do NOT draw the face here; it's drawn in main.py (canvas.before).
+    # Here we draw ring, ticks, hands, and center cap.
+    canvas:
+        # outer ring (white looks best on dark background)
+        Color:
+            rgba: 1, 1, 1, 1
+        Line:
+            circle: (self.center_x, self.center_y, min(self.width, self.height)/2 - dp(4))
+            width: dp(1.5)
+
+        # cardinal tick marks (12, 3, 6, 9)
+        Color:
+            rgba: 1, 1, 1, 1
+        Line:
+            points: [self.center_x, self.y + dp(10), self.center_x, self.y + dp(26)]
+            width: dp(2)
+        Line:
+            points: [self.right - dp(26), self.center_y, self.right - dp(10), self.center_y]
+            width: dp(2)
+        Line:
+            points: [self.center_x, self.top - dp(26), self.center_x, self.top - dp(10)]
+            width: dp(2)
+        Line:
+            points: [self.x + dp(10), self.center_y, self.x + dp(26), self.center_y]
+            width: dp(2)
+
+        # HOUR hand
+        PushMatrix
+        Translate:
+            x: self.center_x
+            y: self.center_y
+        Rotate:
+            angle: -(self.hour / 12.0) * 360
+            origin: 0, 0
+        Color:
+            rgba: 1, 1, 1, 1
+        Line:
+            points: [0, 0, 0, min(self.width, self.height) * 0.28]
+            width: dp(3)
+        PopMatrix
+
+        # MINUTE hand
+        PushMatrix
+        Translate:
+            x: self.center_x
+            y: self.center_y
+        Rotate:
+            angle: -(self.minute / 60.0) * 360
+            origin: 0, 0
+        Color:
+            rgba: 0.95, 0.95, 0.95, 1
+        Line:
+            points: [0, 0, 0, min(self.width, self.height) * 0.38]
+            width: dp(2)
+        PopMatrix
+
+        # SECOND hand (red)
+        PushMatrix
+        Translate:
+            x: self.center_x
+            y: self.center_y
+        Rotate:
+            angle: -(self.second / 60.0) * 360
+            origin: 0, 0
+        Color:
+            rgba: 1, 0.25, 0.25, 1
+        Line:
+            points: [0, 0, 0, min(self.width, self.height) * 0.42]
+            width: dp(1)
+        PopMatrix
+
+        # center cap
+        Color:
+            rgba: 1, 1, 1, 1
+        Ellipse:
+            size: dp(8), dp(8)
+            pos: self.center_x - dp(4), self.center_y - dp(4)
+
+# ---------- Root layout: two clocks side-by-side ----------
+BoxLayout:
+    orientation: 'horizontal'
+    padding: dp(16)
+    spacing: dp(24)
+
+    # LEFT: San Francisco (America/Los_Angeles) — pastel orange face
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(10)
+
+        AnchorLayout:
+            anchor_x: 'center'
+            anchor_y: 'center'
+            AnalogClock:
+                id: sf_clock
+                tzname: 'America/Los_Angeles'
+                label: 'San Francisco'
+                face_color: 1.00, 0.82, 0.60, 1.0   # pastel orange
+
+        Label:
+            text: sf_clock.label
+            color: 0.95, 0.95, 0.95, 1   # visible on dark window background
+            font_size: '18sp'
+            size_hint_y: None
+            height: self.texture_size[1] + dp(6)
+            halign: 'center'
+            valign: 'middle'
+            text_size: self.width, None
+
+    # RIGHT: London (Europe/London) — pastel blue face
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(10)
+
+        AnchorLayout:
+            anchor_x: 'center'
+            anchor_y: 'center'
+            AnalogClock:
+                id: lon_clock
+                tzname: 'Europe/London'
+                label: 'London'
+                face_color: 0.78, 0.86, 1.00, 1.0   # pastel blue
+
+        Label:
+            text: lon_clock.label
+            color: 0.95, 0.95, 0.95, 1
+            font_size: '18sp'
+            size_hint_y: None
+            height: self.texture_size[1] + dp(6)
+            halign: 'center'
+            valign: 'middle'
+            text_size: self.width, None
