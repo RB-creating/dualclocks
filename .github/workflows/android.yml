@@ -1,0 +1,38 @@
+name: Build Android (Kivy)
+
+on:
+  workflow_dispatch:   # manual runs from Actions tab
+  push:
+    branches: [ main ] # or your default branch
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Optional cache: speeds up later builds by caching the Android SDK/NDK
+      - name: Cache Buildozer global dirs
+        uses: actions/cache@v4
+        with:
+          path: .buildozer-global
+          key: buildozer-global
+
+      - name: Build with Buildozer
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          workdir: .
+          buildozer_version: stable
+          command: buildozer android debug
+        env:
+          # Build for modern devices first; you can switch to armeabi-v7a for older phones
+          APP_ANDROID_ARCH: arm64-v8a
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: ${{ steps.buildozer.outputs.filename }}
