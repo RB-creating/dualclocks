@@ -1,13 +1,13 @@
 [app]
-title = My Kivy App
-package.name = mykivyapp
+title = Dual Clocks
+package.name = dualclocks
 package.domain = org.example
 source.dir = .
 source.include_exts = py,kv,png,jpg,ttf,otf,wav,txt,md
 requirements = python3,kivy==2.3.1,pytz
-version = 0.1
+version = 0.1.0
 android.numeric_version = 1
-orientation = portrait
+orientation = landscape
 fullscreen = 0
 android.archs = arm64-v8a
 android.allow_backup = False
