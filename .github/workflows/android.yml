@@ -1,35 +1,42 @@
 name: Build Android (Kivy)
 
 on:
-  workflow_dispatch:     # lets you run it manually from the Actions tab
+  workflow_dispatch:
   push:
-    branches: [ main ]   # change if your default branch has another name
+    branches: [ main ]
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Optional cache: speeds up later builds by caching the Android SDK/NDK
+      # Optional global cache (SDK/NDK) – keep enabled
       - name: Cache Buildozer global dirs
         uses: actions/cache@v4
         with:
           path: .buildozer-global
           key: buildozer-global
-        
+
+      # One-time: force a clean rebuild (remove after it's green)
+      - name: Clean previous build dirs (one-time)
+        run: rm -rf .buildozer .buildozer-global
+
       - name: Build with Buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         id: buildozer
         with:
           workdir: .
           buildozer_version: stable
-          command: buildozer -v android debug   # add -v for verbose logs
+          command: buildozer -v android debug
         env:
+          # Build just one architecture for now
           APP_ANDROID_ARCH: arm64-v8a
-          P4A_LOG_LEVEL: DEBUG                  # extra detail from python-for-android
+          # Kivy: ensure .c files are generated from .pyx before compile
+          CYTHONIZE: "1"
+          # Extra logs from python-for-android
+          P4A_LOG_LEVEL: DEBUG
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
