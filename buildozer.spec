@@ -1,3 +1,5 @@
+
+
 [app]
 # What shows under the app icon
 title = Dual Clocks
@@ -16,6 +18,10 @@ version.filename = %(source.dir)s/main.py
 
 # Pin Kivy to match your KV header; include tzdata so ZoneInfo works on-device
 requirements = python3,kivy==2.3.0,tzdata
+
+
+# Build just one arch for now (simpler/faster; matches the YAML env)
+android.archs = arm64-v8a
 
 # Orientation and window
 orientation = portrait
