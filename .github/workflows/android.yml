@@ -8,38 +8,72 @@ on:
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Optional global cache (SDK/NDK) – keep enabled
-      - name: Cache Buildozer global dirs
+      # Ensure JDK 17 for modern Gradle/p4a toolchains
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Optional caches to speed up builds (safe to keep)
+      - name: Cache Buildozer global dir
         uses: actions/cache@v4
         with:
           path: .buildozer-global
           key: buildozer-global
 
-      # One-time: force a clean rebuild (remove after it's green)
-      - name: Clean previous build dirs (one-time)
-        run: rm -rf .buildozer .buildozer-global
+      # If you need a once-only clean, run it in a separate commit. Otherwise keep cache.
+      # - name: One-time clean (remove after first green build)
+      #   run: rm -rf .buildozer .buildozer-global
 
       - name: Build with Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
         id: buildozer
+        uses: ArtemSBulgakov/buildozer-action@v1
         with:
           workdir: .
           buildozer_version: stable
           command: buildozer -v android debug
         env:
-          # Build just one architecture for now
+          # This env is optional if you already set android.archs in buildozer.spec
           APP_ANDROID_ARCH: arm64-v8a
-          # Kivy: ensure .c files are generated from .pyx before compile
           CYTHONIZE: "1"
-          # Extra logs from python-for-android
           P4A_LOG_LEVEL: DEBUG
 
-      - name: Upload APK artifact
+      - name: Upload APK
+        if: always()          # upload even on failure (may not exist)
         uses: actions/upload-artifact@v4
         with:
           name: apk
           path: ${{ steps.buildozer.outputs.filename }}
+          if-no-files-found: warn
+
+      # Collect **all logs** so we can debug instantly if it fails
+      - name: Archive build logs
+        if: always()
+        run: |
+          mkdir -p artifacts
+          # Buildozer logs
+          if [ -d ".buildozer" ]; then
+            cp -r .buildozer artifacts/.buildozer || true
+          fi
+          # Common python-for-android logs (paths can vary with arch)
+          find .buildozer -maxdepth 6 -type f \
+            \( -name "*.log" -o -name "build*.txt" -o -name "gradle*.log" \) \
+            -exec cp --parents {} artifacts/ \; || true
+          # Bin listing
+          ls -alh bin || true
+        shell: bash
+
+      - name: Upload logs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: artifacts
+          retention-days: 7
