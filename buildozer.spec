@@ -13,7 +13,7 @@ source.dir = .
 source.include_exts = py,kv,png,jpg,ttf,txt
 
 # Read version from main.py: __version__ = "0.1.0"
-version.regex = __version__ = '"['"]
+version.regex = __version__ = ['"](]
 version.filename = %(source.dir)s/main.py
 
 # Pin Kivy to match your KV header; include tzdata so ZoneInfo works on-device
