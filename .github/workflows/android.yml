@@ -50,16 +50,19 @@ jobs:
           path: bin/*.apk
           if-no-files-found: warn
 
-      - name: Archive build logs
+      - name: Archive build logs (full .buildozer)
         if: always()
         run: |
+          set +e
           mkdir -p artifacts
           if [ -d ".buildozer" ]; then
-            find .buildozer -maxdepth 6 -type f \
-              \( -name "*.log" -o -name "build*.txt" -o -name "gradle*.log" \) \
-              -exec cp --parents {} artifacts/ \;
+            tar -C . -czf artifacts/buildozer.tgz .buildozer || true
+            echo "buildozer.tgz size:" && ls -lh artifacts/buildozer.tgz || true
+          else
+            echo "No .buildozer directory was found. The build likely failed before Buildozer created it." > artifacts/README.txt
           fi
-          ls -alh bin || true
+          echo "Disk after build:"
+          df -h || true
 
       - name: Upload logs artifact
         if: always()
