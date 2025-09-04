@@ -1,5 +1,7 @@
 # main.py
 
+__version__ = "0.1.0"
+
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -13,8 +15,6 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Color, Ellipse
 from kivy.metrics import dp
 from kivy.core.window import Window
-
-__version__ = "0.1.0"
 
 # Optional: dark app background so the pastel faces pop
 Window.clearcolor = (0.06, 0.07, 0.09, 1)  # change or remove if you prefer white
