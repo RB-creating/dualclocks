@@ -14,25 +14,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Ensure JDK 17 for modern Gradle/p4a toolchains
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+      # IMPORTANT: Do NOT set JAVA_HOME from the host when using the Docker action.
+      # Remove actions/setup-java to avoid leaking a host-only JAVA_HOME into the container.
 
-      # Optional caches to speed up builds (safe to keep)
+      # Optional global cache for p4a/SDK/NDK that the action uses
       - name: Cache Buildozer global dir
         uses: actions/cache@v4
         with:
           path: .buildozer-global
           key: buildozer-global
 
-      # If you need a once-only clean, run it in a separate commit. Otherwise keep cache.
-      # - name: One-time clean (remove after first green build)
-      #   run: rm -rf .buildozer .buildozer-global
-
-      - name: Build with Buildozer
+      - name: Build with Buildozer (Docker action)
         id: buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         with:
@@ -40,35 +32,40 @@ jobs:
           buildozer_version: stable
           command: buildozer -v android debug
         env:
-          # This env is optional if you already set android.archs in buildozer.spec
+          # Build for a single arch as per your spec
           APP_ANDROID_ARCH: arm64-v8a
           CYTHONIZE: "1"
           P4A_LOG_LEVEL: DEBUG
+          # CRITICAL: Point JAVA_HOME to the JDK INSIDE the container
+          # (Buildozer log shows javac at this path.)
+          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
 
-      - name: Upload APK
-        if: always()          # upload even on failure (may not exist)
+      # Fix permissions: files written by the container may be owned by root
+      - name: Fix workspace ownership
+        if: always()
+        run: sudo chown -R "$USER:$USER" .
+
+      # Upload any APKs (won't fail if none exist)
+      - name: Upload APK(s)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: bin/*.apk
           if-no-files-found: warn
 
-      # Collect **all logs** so we can debug instantly if it fails
+      # Collect logs for easier debugging
       - name: Archive build logs
         if: always()
         run: |
           mkdir -p artifacts
-          # Buildozer logs
           if [ -d ".buildozer" ]; then
-            cp -r .buildozer artifacts/.buildozer || true
+            # Keep log depth modest; increase if we need more
+            find .buildozer -maxdepth 6 -type f \
+              \( -name "*.log" -o -name "build*.txt" -o -name "gradle*.log" \) \
+              -exec cp --parents {} artifacts/ \;
           fi
-          # Common python-for-android logs (paths can vary with arch)
-          find .buildozer -maxdepth 6 -type f \
-            \( -name "*.log" -o -name "build*.txt" -o -name "gradle*.log" \) \
-            -exec cp --parents {} artifacts/ \; || true
-          # Bin listing
           ls -alh bin || true
-        shell: bash
 
       - name: Upload logs artifact
         if: always()
@@ -77,3 +74,4 @@ jobs:
           name: build-logs
           path: artifacts
           retention-days: 7
+          if-no-files-found: warn
