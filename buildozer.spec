@@ -4,10 +4,12 @@ package.name = dualclocks
 package.domain = org.robbertolini
 
 source.dir = .
-source.include_exts = py,kv,png,jpg,ttf,txt
+source.include_exts = py,kv, png, jpg,ttf, txt
 
-version.regex = __version__ = '"['"]
-version.filename = %(source.dir)s/main.py
+version = 0.1.0
+
+# version.regex = __version__ = '"['"]
+# version.filename = %(source.dir)s/main.py
 
 requirements = python3,kivy==2.3.0,tzdata
 
