@@ -21,10 +21,11 @@ from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.logger import Logger
 
-# Global white background
-Window.clearcolor = (1, 1, 1, 1)
+# -------- Global UI constants --------
+Window.clearcolor = (1, 1, 1, 1)   # white background
+COMPACT_BREAKPOINT_DP = 740        # ~phones in landscape
 
-# A curated set of common IANA time zones (add/remove as needed)
+# ---- Time zone list & helpers ----
 COMMON_TZS = (
     # Americas
     "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York",
@@ -57,7 +58,6 @@ def friendly_label_from_tz(tzname: str) -> str:
     last = tzname.split("/")[-1]
     return last.replace("_", " ")
 
-
 def build_friendly_lists(tzs):
     """
     Build mappings so Spinner shows city-only names.
@@ -70,12 +70,10 @@ def build_friendly_lists(tzs):
         region = parts[-2].replace("_", " ") if len(parts) > 1 else ""
         entries.append((tz, city, region))
 
-    # Count city occurrences
     counts = {}
     for _, city, _ in entries:
         counts[city] = counts.get(city, 0) + 1
 
-    # Create final friendly labels (city or "City (Region)" if duplicate)
     items = []
     for tz, city, region in entries:
         label = f"{city} ({region})" if counts[city] > 1 and region else city
@@ -86,9 +84,7 @@ def build_friendly_lists(tzs):
     friendly_values = tuple(label for _, label in items)
     return tz_to_friendly, friendly_to_tz, friendly_values
 
-
 TZ_TO_FRIENDLY, FRIENDLY_TO_TZ, FRIENDLY_VALUES = build_friendly_lists(COMMON_TZS)
-
 
 def _resolve_tz(name: str):
     """Return a tzinfo or None if not available."""
@@ -98,7 +94,6 @@ def _resolve_tz(name: str):
         except Exception as e:
             Logger.warning(f"AnalogClock: ZoneInfo could not resolve '{name}': {e}")
     return None  # means use UTC fallback
-
 
 def _offset_seconds_for_tz(tzname: str) -> int:
     """Return the current UTC offset in seconds for the given tz name, or 0 if unknown."""
@@ -113,14 +108,12 @@ def _offset_seconds_for_tz(tzname: str) -> int:
         Logger.exception(f"AnalogClock: failed to get offset for '{tzname}': {e}")
         return 0
 
-
 # ---- Light green Spinner styles ----
 LIGHT_GREEN_BTN = (0.88, 1.00, 0.88, 1.0)  # button face
 LIGHT_GREEN_OPT = (0.92, 1.00, 0.92, 1.0)  # dropdown options
 DARK_TEXT = (0.10, 0.10, 0.10, 1.0)
 BRIGHT_GREEN = (0.00, 0.80, 0.00, 1.0)
 BRIGHT_RED = (0.95, 0.00, 0.00, 1.0)
-
 
 class LightSpinnerOption(SpinnerOption):
     def __init__(self, **kwargs):
@@ -130,19 +123,24 @@ class LightSpinnerOption(SpinnerOption):
         self.background_color = LIGHT_GREEN_OPT
         self.color = DARK_TEXT
 
-
 def style_spinner(sp: Spinner):
-    """Apply light green style to a Spinner."""
+    """Apply light green style and ellipsis to a Spinner."""
     sp.background_normal = ''
     sp.background_down = ''
     sp.background_color = LIGHT_GREEN_BTN
     sp.color = DARK_TEXT
     sp.option_cls = LightSpinnerOption
-
+    # Prevent long city names from forcing the layout wider
+    sp.shorten = True
+    sp.shorten_from = 'right'
+    def _apply_text_size(_sp, *_):
+        _sp.text_size = (_sp.width - dp(8), None)
+    sp.bind(size=_apply_text_size)
+    _apply_text_size(sp)
 
 # ---- Arrow widget (canvas-drawn, scalable) ----
 class ArrowWidget(Widget):
-    direction = StringProperty('right')  # 'right', 'left' (we'll keep it 'right')
+    direction = StringProperty('right')  # keep 'right' always
     color = ListProperty(BRIGHT_GREEN)
     thickness = NumericProperty(dp(2.0))
 
@@ -178,61 +176,47 @@ class ArrowWidget(Widget):
         xL = self.x + pad
         xR = self.right - pad
 
-        if self.direction == 'right':
-            # Shaft
-            self._shaft.points = [xL, y, xR - head, y]
-            # Head (V-shaped)
-            self._head1.points = [xR, y, xR - head, y + head * 0.6]
-            self._head2.points = [xR, y, xR - head, y - head * 0.6]
-        else:  # 'left'
-            self._shaft.points = [xR, y, xL + head, y]
-            self._head1.points = [xL, y, xL + head, y + head * 0.6]
-            self._head2.points = [xL, y, xL + head, y - head * 0.6]
+        # Always draw pointing right
+        self._shaft.points = [xL, y, xR - head, y]
+        self._head1.points = [xR, y, xR - head, y + head * 0.6]
+        self._head2.points = [xR, y, xR - head, y - head * 0.6]
 
-
+# ---- Analog clock widget ----
 class AnalogClock(Widget):
-    # Public properties
     tzname = StringProperty("UTC")
     label = StringProperty("Zone")
-
-    # Colors
-    face_color = ListProperty([1, 1, 1, 1])  # clock face fill
-    tick_color = ListProperty([0.1, 0.1, 0.1, 1])  # hour tick color (dark)
+    face_color = ListProperty([1, 1, 1, 1])
+    tick_color = ListProperty([0.1, 0.1, 0.1, 1])
     hour_hand_color = ListProperty([0.1, 0.1, 0.1, 1])
     minute_hand_color = ListProperty([0.1, 0.1, 0.1, 1])
     second_hand_color = ListProperty([0.8, 0.0, 0.0, 1])
 
-    # Time state (floats for stepped motion)
     hour = NumericProperty(0.0)
     minute = NumericProperty(0.0)
     second = NumericProperty(0.0)
 
-    # Flag to log tz fallback warning once
     _warned_tz = BooleanProperty(False)
 
     def __init__(self, **kwargs):
-        # Ensure a visible default size if none provided
+        # Give a default visible size unless parent controls it
         if "size" not in kwargs and ("size_hint" not in kwargs or kwargs.get("size_hint") is None):
             kwargs.setdefault("size_hint", (None, None))
             kwargs.setdefault("size", (dp(260), dp(260)))
         super().__init__(**kwargs)
 
-        # --- FACE (behind) ---
+        # Face
         with self.canvas.before:
             self._face_color_instr = Color(rgba=self.face_color)
             self._face_ellipse = Ellipse()
 
-        # --- TICKS + HANDS (main) ---
+        # Ticks + hands
         with self.canvas:
-            # Minute ticks (60) - light gray, thin
             self._minute_tick_color_instr = Color(rgba=(0.7, 0.7, 0.7, 1))
             self._minute_ticks = [Line(points=[0, 0, 0, 0], width=dp(1)) for _ in range(60)]
 
-            # Hour ticks (12) - darker, thicker
             self._tick_color_instr = Color(rgba=self.tick_color)
             self._tick_marks = [Line(points=[0, 0, 0, 0], width=dp(2)) for _ in range(12)]
 
-            # Hands: hour, minute, second
             self._hour_color_instr = Color(rgba=self.hour_hand_color)
             self._hour_hand = Line(points=[], width=dp(4), cap='round')
 
@@ -242,12 +226,12 @@ class AnalogClock(Widget):
             self._second_color_instr = Color(rgba=self.second_hand_color)
             self._second_hand = Line(points=[], width=dp(1.5), cap='round')
 
-        # --- Center hub (top) ---
+        # Center hub
         with self.canvas.after:
             self._hub_color_instr = Color(rgba=(0.1, 0.1, 0.1, 1))
             self._hub = Ellipse(size=(dp(10), dp(10)))
 
-        # --- Numerals (12 / 3 / 6 / 9) as child Labels ---
+        # Numerals
         self._lbl12 = Label(text='12', color=DARK_TEXT, font_size='20sp', size_hint=(None, None))
         self._lbl3 = Label(text='3', color=DARK_TEXT, font_size='20sp', size_hint=(None, None))
         self._lbl6 = Label(text='6', color=DARK_TEXT, font_size='20sp', size_hint=(None, None))
@@ -257,7 +241,6 @@ class AnalogClock(Widget):
             lbl.size = lbl.texture_size
             self.add_widget(lbl)
 
-        # Bind updates
         self.bind(
             pos=self._update_geometry,
             size=self._update_geometry,
@@ -271,33 +254,19 @@ class AnalogClock(Widget):
             second=self._update_hands,
         )
 
-        # Resolve timezone
         self._tz = _resolve_tz(self.tzname)
-
-        # Start timer: STEP ONCE PER SECOND
         self._evt = KivyClock.schedule_interval(self._update_time, 1.0)
-
-        # Initial draw
         self._update_geometry()
         self._update_time(0)
 
-    # ----- Color updaters -----
-    def _apply_face_color(self, *_):
-        self._face_color_instr.rgba = self.face_color
+    # Color updaters
+    def _apply_face_color(self, *_):   self._face_color_instr.rgba = self.face_color
+    def _apply_tick_color(self, *_):   self._tick_color_instr.rgba = self.tick_color
+    def _apply_hour_color(self, *_):   self._hour_color_instr.rgba = self.hour_hand_color
+    def _apply_minute_color(self, *_): self._minute_color_instr.rgba = self.minute_hand_color
+    def _apply_second_color(self, *_): self._second_color_instr.rgba = self.second_hand_color
 
-    def _apply_tick_color(self, *_):
-        self._tick_color_instr.rgba = self.tick_color
-
-    def _apply_hour_color(self, *_):
-        self._hour_color_instr.rgba = self.hour_hand_color
-
-    def _apply_minute_color(self, *_):
-        self._minute_color_instr.rgba = self.minute_hand_color
-
-    def _apply_second_color(self, *_):
-        self._second_color_instr.rgba = self.second_hand_color
-
-    # ----- Geometry (face, ticks, hub, numerals) -----
+    # Geometry (face, ticks, hub, numerals)
     def _update_geometry(self, *_):
         inset = dp(6)
         d = max(0.0, min(self.width, self.height) - 2 * inset)
@@ -312,7 +281,6 @@ class AnalogClock(Widget):
         for j, mt in enumerate(self._minute_ticks):
             angle = 2 * pi * j / 60.0
             if j % 5 == 0:
-                # Hide minute tick at hour positions (set zero-length)
                 x = cx + 0.90 * radius * sin(angle)
                 y = cy + 0.90 * radius * cos(angle)
                 mt.points = [x, y, x, y]
@@ -323,7 +291,7 @@ class AnalogClock(Widget):
                 y2 = cy + 0.97 * radius * cos(angle)
                 mt.points = [x1, y1, x2, y2]
 
-        # Hour ticks (12)
+        # Hour ticks
         for i, tick in enumerate(self._tick_marks):
             angle = 2 * pi * i / 12.0
             x1 = cx + 0.80 * radius * sin(angle)
@@ -332,28 +300,26 @@ class AnalogClock(Widget):
             y2 = cy + 0.98 * radius * cos(angle)
             tick.points = [x1, y1, x2, y2]
 
-        # Hub circle
+        # Hub
         hub_r = dp(5)
         self._hub.size = (2 * hub_r, 2 * hub_r)
         self._hub.pos = (cx - hub_r, cy - hub_r)
 
-        # Numeral positions
+        # Numerals
         r_numeral = 0.72 * radius
         self._lbl12.center = (cx, cy + r_numeral)
         self._lbl3.center = (cx + r_numeral, cy)
         self._lbl6.center = (cx, cy - r_numeral)
         self._lbl9.center = (cx - r_numeral, cy)
 
-        # Update hands with new geometry
         self._update_hands()
 
-    # ----- Time & hands -----
+    # Time & hands
     def on_tzname(self, *_):
         self._tz = _resolve_tz(self.tzname)
-        self._warned_tz = False  # allow warning again if needed
+        self._warned_tz = False
 
     def on_parent(self, *args):
-        # Stop the timer if widget is removed from the tree
         if self.parent is None and getattr(self, "_evt", None):
             self._evt.cancel()
             self._evt = None
@@ -371,11 +337,9 @@ class AnalogClock(Widget):
                 self._warned_tz = True
                 now = datetime.now(timezone.utc)
         except Exception as e:
-            # Absolute safety net—never crash the app
             Logger.exception(f"AnalogClock: time update failed for '{self.tzname}': {e}")
             now = datetime.now(timezone.utc)
 
-        # Stepped second hand (updates once per second)
         self.second = now.second
         self.minute = now.minute + self.second / 60.0
         self.hour = (now.hour % 12) + self.minute / 60.0
@@ -388,12 +352,10 @@ class AnalogClock(Widget):
         cx, cy = self.center
         radius = d / 2.0
 
-        # Angles (0 at 12 o'clock, clockwise)
         a_h = 2 * pi * (self.hour / 12.0)
         a_m = 2 * pi * (self.minute / 60.0)
         a_s = 2 * pi * (self.second / 60.0)
 
-        # Endpoints
         hx = cx + 0.50 * radius * sin(a_h)
         hy = cy + 0.50 * radius * cos(a_h)
         mx = cx + 0.75 * radius * sin(a_m)
@@ -405,115 +367,149 @@ class AnalogClock(Widget):
         self._minute_hand.points = [cx, cy, mx, my]
         self._second_hand.points = [cx, cy, sx, sy]
 
-
+# ---- App ----
 class DualClocksApp(App):
     def build(self):
-        # ---- Root: vertical layout with a top bar + content (prevents overlap) ----
+        # Root: vertical (top bar + content)
         root = BoxLayout(orientation='vertical')
 
-        # ---- Top bar (dedicated area for the close button) ----
+        # Top bar with padding so the X doesn't collide with status bar/notch
         top_bar = AnchorLayout(
             anchor_x='right', anchor_y='top',
-            size_hint=(1, None),
-            height=dp(56)  # standard toolbar height
+            size_hint=(1, None), height=dp(56)
         )
-        close_button = Button(
-            text='X',
-            size_hint=(None, None),
-            size=(dp(40), dp(40)),
-        )
+        # Add a bit of internal padding
+        # (Kivy's AnchorLayout doesn't have 'padding' param directly; emulate with a box)
+        top_container = BoxLayout(size_hint=(1, 1), padding=[0, dp(8), dp(8), 0])
+        close_button = Button(text='X', size_hint=(None, None), size=(dp(40), dp(40)))
         close_button.bind(on_release=lambda *_: App.get_running_app().stop())
-        top_bar.add_widget(close_button)
+        right_holder = AnchorLayout(anchor_x='right', anchor_y='top')
+        right_holder.add_widget(close_button)
+        top_container.add_widget(right_holder)
+        top_bar.add_widget(top_container)
 
-        # ---- The row of clocks and center difference column ----
-        row = BoxLayout(
-            orientation='horizontal',
-            size_hint=(1, 1),   # fill remaining space below the top bar
-            padding=dp(16),
-            spacing=dp(24),
-        )
+        # Content area (we will rebuild into landscape/portrait)
+        self.content = BoxLayout(orientation='vertical', size_hint=(1, 1))
 
-        # LEFT clock (defaults to Los Angeles)
+        # Build reusable columns/widgets once
+        self._make_columns()
+
+        # Assemble
+        root.add_widget(top_bar)
+        root.add_widget(self.content)
+
+        # Start timers/labels
+        self._update_diff_label(0)
+        KivyClock.schedule_interval(self._update_diff_label, 1.0)
+
+        # React to size/orientation
+        Window.bind(size=lambda *_: self._rebuild_content())
+        self._rebuild_content()   # build initial layout
+
+        return root
+
+    # ----- Build reusable left/right/center pieces -----
+    def _make_columns(self):
+        # LEFT
         self.left_clock = AnalogClock(
             tzname="America/Los_Angeles",
             label="San Francisco",
             face_color=[1.00, 0.82, 0.60, 1.0],
-            size_hint=(1, 1),  # responsive
+            size_hint=(1, 1),
         )
-        left_col = BoxLayout(orientation='vertical', spacing=dp(8))
-        left_anchor = AnchorLayout(anchor_x='center', anchor_y='center')
-        left_anchor.add_widget(self.left_clock)
         left_initial_label = TZ_TO_FRIENDLY.get(
             self.left_clock.tzname, friendly_label_from_tz(self.left_clock.tzname)
         )
         self.left_spinner = Spinner(
-            text=left_initial_label,
-            values=FRIENDLY_VALUES,
-            size_hint=(1, None),  # responsive width
-            height=dp(38)
+            text=left_initial_label, values=FRIENDLY_VALUES,
+            size_hint=(1, None), height=dp(38)
         )
         self.left_spinner.bind(text=self._on_left_city_change)
         style_spinner(self.left_spinner)
-        left_col.add_widget(left_anchor)
-        left_col.add_widget(self.left_spinner)
+        self.left_col = BoxLayout(orientation='vertical', spacing=dp(8))
+        left_anchor = AnchorLayout(anchor_x='center', anchor_y='center')
+        left_anchor.add_widget(self.left_clock)
+        self.left_col.add_widget(left_anchor)
+        self.left_col.add_widget(self.left_spinner)
 
-        # RIGHT clock (defaults to London)
+        # RIGHT
         self.right_clock = AnalogClock(
             tzname="Europe/London",
             label="London",
             face_color=[0.78, 0.86, 1.00, 1.0],
-            size_hint=(1, 1),  # responsive
+            size_hint=(1, 1),
         )
-        right_col = BoxLayout(orientation='vertical', spacing=dp(8))
-        right_anchor = AnchorLayout(anchor_x='center', anchor_y='center')
-        right_anchor.add_widget(self.right_clock)
         right_initial_label = TZ_TO_FRIENDLY.get(
             self.right_clock.tzname, friendly_label_from_tz(self.right_clock.tzname)
         )
         self.right_spinner = Spinner(
-            text=right_initial_label,
-            values=FRIENDLY_VALUES,
-            size_hint=(1, None),  # responsive width
-            height=dp(38)
+            text=right_initial_label, values=FRIENDLY_VALUES,
+            size_hint=(1, None), height=dp(38)
         )
         self.right_spinner.bind(text=self._on_right_city_change)
         style_spinner(self.right_spinner)
-        right_col.add_widget(right_anchor)
-        right_col.add_widget(self.right_spinner)
+        self.right_col = BoxLayout(orientation='vertical', spacing=dp(8))
+        right_anchor = AnchorLayout(anchor_x='center', anchor_y='center')
+        right_anchor.add_widget(self.right_clock)
+        self.right_col.add_widget(right_anchor)
+        self.right_col.add_widget(self.right_spinner)
 
-        # CENTER column: signed difference text + arrow
-        center_col = BoxLayout(orientation='vertical', size_hint=(None, 1), width=dp(220))
-        center_col.add_widget(Widget())  # spacer to align with spinners row
-        center_box = BoxLayout(orientation='horizontal', size_hint=(1, None), height=dp(38), spacing=dp(8))
+        # CENTER (diff + arrow)
         self.center_diff_label = Label(
-            text="", color=BRIGHT_GREEN,
-            font_size='16sp',
-            size_hint=(1, 1),
-            halign='right', valign='middle'
+            text="", color=BRIGHT_GREEN, font_size='16sp',
+            size_hint=(1, 1), halign='right', valign='middle'
         )
         self.center_diff_label.bind(size=lambda lbl, _:
                                     setattr(lbl, "text_size", (lbl.width, None)))
+        self.center_diff_label.bind(texture_size=lambda *_: self._apply_responsive())
+
         self.center_arrow = ArrowWidget(size_hint=(None, 1), width=dp(42))
-        center_box.add_widget(self.center_diff_label)
-        center_box.add_widget(self.center_arrow)
-        center_col.add_widget(center_box)
+        self.center_box = BoxLayout(orientation='horizontal', size_hint=(1, None),
+                                    height=dp(38), spacing=dp(8))
+        self.center_box.add_widget(self.center_diff_label)
+        self.center_box.add_widget(self.center_arrow)
 
-        # Assemble row (left | center | right)
-        row.add_widget(left_col)
-        row.add_widget(center_col)
-        row.add_widget(right_col)
+        # For landscape we like the box to be vertically centered; wrap in a column with spacer.
+        self.center_col = BoxLayout(orientation='vertical', size_hint=(None, 1), width=dp(160))
+        self.center_col.add_widget(Widget())        # spacer
+        self.center_col.add_widget(self.center_box)
 
-        # Add bar and content to root
-        root.add_widget(top_bar)
-        root.add_widget(row)
+    # ----- Rebuild content when orientation/size changes -----
+    def _rebuild_content(self):
+        self.content.clear_widgets()
 
-        # Initial difference + periodic updates
-        self._update_diff_label(0)
-        KivyClock.schedule_interval(self._update_diff_label, 1.0)
+        w, h = Window.size
+        landscape = w >= h
 
-        return root
+        if landscape:
+            row = BoxLayout(
+                orientation='horizontal',
+                size_hint=(1, 1),
+                padding=dp(16),
+                spacing=dp(24),
+            )
+            row.add_widget(self.left_col)
+            row.add_widget(self.center_col)  # fixed width (responsive in _apply_responsive)
+            row.add_widget(self.right_col)
+            self.content.add_widget(row)
+            self._current_container = row
+        else:
+            # Portrait: stack to avoid squishing
+            col = BoxLayout(
+                orientation='vertical',
+                size_hint=(1, 1),
+                padding=dp(12),
+                spacing=dp(12),
+            )
+            col.add_widget(self.left_col)
+            col.add_widget(self.center_box)  # use just the row (no vertical spacer)
+            col.add_widget(self.right_col)
+            self.content.add_widget(col)
+            self._current_container = col
 
-    # Spinner handlers: map friendly text back to IANA tz, update clock + diff UI
+        self._apply_responsive()
+
+    # ----- Spinner handlers -----
     def _on_left_city_change(self, spinner, friendly_label):
         tz = FRIENDLY_TO_TZ.get(friendly_label)
         if not tz:
@@ -530,31 +526,22 @@ class DualClocksApp(App):
         self.right_clock.label = friendly_label
         self._update_diff_label(0)
 
+    # ----- Time difference / arrow coloring -----
     def _format_signed_diff_text(self, seconds_b_minus_a: int) -> str:
-        # Signed left→right: positive means right is ahead of left
         secs = int(seconds_b_minus_a)
         sign = "+" if secs > 0 else "-" if secs < 0 else ""
         secs = abs(secs)
         hours = secs // 3600
         minutes = (secs % 3600) // 60
-        if minutes == 0:
-            return f"{sign}{hours} Hours"
-        else:
-            return f"{sign}{hours} Hours {minutes} Minutes"
+        return f"{sign}{hours} Hours" if minutes == 0 else f"{sign}{hours} Hours {minutes} Minutes"
 
     def _update_diff_label(self, dt):
-        # Compute current UTC offsets
         off_left = _offset_seconds_for_tz(self.left_clock.tzname)
         off_right = _offset_seconds_for_tz(self.right_clock.tzname)
-
-        # Right minus left (signed)
         delta = off_right - off_left
 
-        # Text (e.g., "+8 Hours" or "-3 Hours 30 Minutes")
-        text = self._format_signed_diff_text(delta)
-        self.center_diff_label.text = text
+        self.center_diff_label.text = self._format_signed_diff_text(delta)
 
-        # Color + arrow (arrow always points RIGHT; color communicates lead/lag)
         if delta > 0:
             self.center_diff_label.color = BRIGHT_GREEN
             self.center_arrow.color = BRIGHT_GREEN
@@ -563,14 +550,49 @@ class DualClocksApp(App):
         elif delta < 0:
             self.center_diff_label.color = BRIGHT_RED
             self.center_arrow.color = BRIGHT_RED
-            # Keep the arrow pointing right even when negative
             self.center_arrow.direction = 'right'
             self.center_arrow.opacity = 1.0
         else:
-            # Same time: neutral (hide arrow)
             self.center_diff_label.color = DARK_TEXT
             self.center_arrow.opacity = 0.0
 
+    # ----- Responsive layout tweaks -----
+    def _apply_responsive(self):
+        w, h = Window.size
+        compact = w <= dp(COMPACT_BREAKPOINT_DP)
+        landscape = w >= h
+
+        # Padding/spacing per mode
+        if hasattr(self, "_current_container") and self._current_container:
+            if isinstance(self._current_container, BoxLayout):
+                self._current_container.padding = dp(8) if compact else dp(16)
+                self._current_container.spacing = dp(8) if compact else dp(24)
+
+        # Spinner sizing per mode
+        for sp in getattr(self, "left_spinner", []), getattr(self, "right_spinner", []):
+            if not sp:  # defensive
+                continue
+            sp.height = dp(34) if compact else dp(38)
+            sp.font_size = '14sp' if compact else '16sp'
+
+        # Center sizing
+        lbl_w = self.center_diff_label.texture_size[0] or dp(60)
+        arrow_w = dp(42)
+        pad = dp(12)
+        min_w = dp(90 if compact else 110)
+        max_w = dp(150 if compact else 200)
+        target_w = min(max(min_w, lbl_w + arrow_w + pad), max_w)
+
+        if landscape:
+            # Use the centered column with fixed width
+            self.center_col.size_hint = (None, 1)
+            self.center_col.width = target_w
+            self.center_box.size_hint = (1, None)
+            self.center_box.height = dp(38)
+        else:
+            # Portrait: center row stretches full width, modest height
+            self.center_box.size_hint = (1, None)
+            self.center_box.height = dp(38)
 
 if __name__ == "__main__":
     DualClocksApp().run()
