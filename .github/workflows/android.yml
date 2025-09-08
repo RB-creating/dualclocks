@@ -6,12 +6,10 @@ on:
     branches: [main]
     tags: ['v*']
 
-# Keep minimal permissions; adjust if needed later.
 permissions:
   contents: read
   actions: read
 
-# Cancel previous in-progress runs for the same ref
 concurrency:
   group: build-apk-${{ github.ref }}
   cancel-in-progress: true
@@ -24,21 +22,22 @@ jobs:
         uses: actions/checkout@v4
 
       # Build the APK using the Buildozer action
-      # Use the action-recommended install path and run Buildozer via the Python module.
       - name: Build with Buildozer
         id: buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         env:
           USER: root
+          # Allow pip to install Buildozer inside the container despite PEP 668
+          PIP_BREAK_SYSTEM_PACKAGES: "1"
         with:
           workdir: .
-          # Install the latest stable Buildozer in the container (recommended by the action).
-          # This avoids relying on a pre-baked binary on PATH, which can cause exit 127.
           buildozer_version: stable
-          # Run via python -m so we don't depend on the console script being on PATH.
+          # Use the module form to avoid PATH/console-script issues (prevents exit 127)
           command: >
             python3 -V;
             python3 -m pip --version;
+            python3 -m pip show buildozer || true;
+            python3 -m buildozer --version || true;
             python3 -m buildozer -v android debug
 
       # Ensure no KV files were packed (top-level, and inside assets/private.mp3 ZIP)
