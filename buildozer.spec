@@ -1,28 +1,14 @@
-[app]
-title = Dual Clocks
-package.name = dualclocks
-package.domain = org.robbertolini
+import kivy
+kivy.require('2.3.0')
 
-source.dir = .
-source.include_exts = py,kv, png, jpg,ttf, txt
+from kivy.app import App
+from kivy.uix.label import Label
+from kivy.core.window import Window
+Window.clearcolor = (1, 1, 1, 1)
 
-version = 0.1.0
+class DualClocksApp(App):
+    def build(self):
+        return Label(text='Hello from Kivy!')
 
-# version.regex = __version__ = '"['"]
-# version.filename = %(source.dir)s/main.py
-
-requirements = python3,kivy==2.3.0,tzdata
-
-# One arch for fast CI
-android.archs = arm64-v8a
-
-# Match a stable toolchain (p4a currently recommends NDK r25b; your log shows it downloads 25b)
-android.api = 31
-android.minapi = 24
-android.ndk = 25b
-
-orientation = portrait
-fullscreen = 0
-
-[buildozer]
-log_level = 2
+if __name__ == '__main__':
+    DualClocksApp().run()
