@@ -1,6 +1,6 @@
 name: Android APK (Buildozer)
 
-'on':
+on:
   workflow_dispatch: {}
   push:
     branches: [main]
@@ -24,15 +24,22 @@ jobs:
         uses: actions/checkout@v4
 
       # Build the APK using the Buildozer action
-      # Note: buildozer_version: '' prevents a pip install inside the container (avoids PEP 668).
+      # Use the action-recommended install path and run Buildozer via the Python module.
       - name: Build with Buildozer
         id: buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         env:
-          USER: root                   # <-- fixes the 'chown: invalid user' error inside the container
+          USER: root
         with:
           workdir: .
-          buildozer_version: ''        # <-- use Buildozer from the image; don't pip install
+          # Install the latest stable Buildozer in the container (recommended by the action).
+          # This avoids relying on a pre-baked binary on PATH, which can cause exit 127.
+          buildozer_version: stable
+          # Run via python -m so we don't depend on the console script being on PATH.
+          command: >
+            python3 -V;
+            python3 -m pip --version;
+            python3 -m buildozer -v android debug
 
       # Ensure no KV files were packed (top-level, and inside assets/private.mp3 ZIP)
       - name: Verify no .kv files in APK
@@ -46,7 +53,8 @@ jobs:
           unzip -l "$APK" | grep -Ei '\.kv$' && { echo "Found .kv in APK"; exit 1; } || true
           # 2) inner python-for-android payload (assets/private.mp3 is a ZIP)
           if unzip -p "$APK" assets/private.mp3 > private.zip 2>/dev/null; then
-            unzip -l private.zip | grep -Ei '\.kv$' && { echo "Found .kv in assets/private.mp3"; exit 1; } || echo "No .kv files found."
+            unzip -l private.zip | grep -Ei '\.kv$' && { echo "Found .kv in assets/private.mp3"; rm -f private.zip; exit 1; } || echo "No .kv files found."
+            rm -f private.zip
           else
             echo "No assets/private.mp3 found; skipping inner scan."
           fi
