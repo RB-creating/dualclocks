@@ -27,18 +27,22 @@ jobs:
         uses: ArtemSBulgakov/buildozer-action@v1
         env:
           USER: root
-          # Allow pip to install Buildozer inside the container despite PEP 668
+          # Allow pip to install into the system Python despite PEP 668:
+          # The action installs Buildozer with --user.
           PIP_BREAK_SYSTEM_PACKAGES: "1"
+          # Make sure we don't accidentally run a pre-activated venv
+          VIRTUAL_ENV: ""
         with:
           workdir: .
           buildozer_version: stable
-          # Use the module form to avoid PATH/console-script issues (prevents exit 127)
+          # Use the same interpreter that just installed Buildozer (outside any venv)
           command: >
-            python3 -V;
-            python3 -m pip --version;
-            python3 -m pip show buildozer || true;
-            python3 -m buildozer --version || true;
-            python3 -m buildozer -v android debug
+            which python3 || true;
+            /bin/python3 -V;
+            /bin/python3 -m pip --version;
+            /bin/python3 -m pip show buildozer || true;
+            /bin/python3 -m buildozer --version || true;
+            /bin/python3 -m buildozer -v android debug
 
       # Ensure no KV files were packed (top-level, and inside assets/private.mp3 ZIP)
       - name: Verify no .kv files in APK
