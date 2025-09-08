@@ -1,58 +1,61 @@
 name: Android APK (Buildozer)
 
- on:
-   workflow_dispatch:
-   push:
-     branches: [ main ]
-     tags: [ 'v*' ]
+'on':
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    tags: ['v*']
 
--permissions:
--  contents: read
--  actions: read
-+# (Optional) Start minimal; if upload fails with 403, add `actions: write`.
-+permissions:
-+  contents: read
-+  actions: read
+# Keep minimal permissions; adjust if needed later.
+permissions:
+  contents: read
+  actions: read
 
- concurrency:
-   group: build-apk-${{ github.ref }}
-   cancel-in-progress: true
+# Cancel previous in-progress runs for the same ref
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
 
- jobs:
-   build-android:
-     runs-on: ubuntu-latest
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-     steps:
-       - name: Checkout
-         uses: actions/checkout@v4
+      # Build the APK using the Buildozer action
+      # Note: buildozer_version: '' prevents a pip install inside the container (avoids PEP 668).
+      - name: Build with Buildozer
+        id: buildozer
+        uses: ArtemSBulgakov/buildozer-action@v1
+        env:
+          USER: root                   # <-- fixes the 'chown: invalid user' error inside the container
+        with:
+          workdir: .
+          buildozer_version: ''        # <-- use Buildozer from the image; don't pip install
 
-       - name: Build with Buildozer
-         id: buildozer
-         uses: ArtemSBulgakov/buildozer-action@v1
-+        env:
-+          USER: root   # fix: entrypoint chowns to $USER; ensure a valid user exists in container
-         with:
-           workdir: .
-           buildozer_version: ''  # use image's Buildozer; avoid pip+PEP 668
+      # Ensure no KV files were packed (top-level, and inside assets/private.mp3 ZIP)
+      - name: Verify no .kv files in APK
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          set -e
+          APK="${{ steps.buildozer.outputs.filename }}"
+          echo "Scanning $APK ..."
+          # 1) top-level APK
+          unzip -l "$APK" | grep -Ei '\.kv$' && { echo "Found .kv in APK"; exit 1; } || true
+          # 2) inner python-for-android payload (assets/private.mp3 is a ZIP)
+          if unzip -p "$APK" assets/private.mp3 > private.zip 2>/dev/null; then
+            unzip -l private.zip | grep -Ei '\.kv$' && { echo "Found .kv in assets/private.mp3"; exit 1; } || echo "No .kv files found."
+          else
+            echo "No assets/private.mp3 found; skipping inner scan."
+          fi
 
-       - name: Verify no .kv files in APK
-         if: ${{ success() }}
-         shell: bash
-         run: |
-           set -e
-           APK="${{ steps.buildozer.outputs.filename }}"
-           echo "Scanning $APK ..."
-           unzip -l "$APK" | grep -Ei '\.kv$' && { echo "Found .kv in APK"; exit 1; } || true
-           if unzip -p "$APK" assets/private.mp3 > private.zip 2>/dev/null; then
-             unzip -l private.zip | grep -Ei '\.kv$' && { echo "Found .kv in assets/private.mp3"; exit 1; } || echo "No .kv files found."
-           else
-             echo "No assets/private.mp3 found; skipping inner scan."
-           fi
-
-       - name: Upload APK (short retention)
-         if: ${{ success() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
-         uses: actions/upload-artifact@v4
-         with:
-           name: apk-${{ github.ref_name }}-${{ github.run_number }}
-           path: ${{ steps.buildozer.outputs.filename }}
-           retention-days: 3
+      # Upload the APK when building main or a tag; keep it only a few days
+      - name: Upload APK (short retention)
+        if: ${{ success() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ github.ref_name }}-${{ github.run_number }}
+          path: ${{ steps.buildozer.outputs.filename }}
+          retention-days: 3
