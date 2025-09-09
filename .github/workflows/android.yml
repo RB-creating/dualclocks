@@ -3,7 +3,6 @@ name: Build Android APK (Kivy + Buildozer)
 on:
   push:
     branches: [ main ]
-    # Trigger rebuild when app files change (adjust as needed)
     paths:
       - "buildozer.spec"
       - "**/*.py"
@@ -24,17 +23,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
-    # If your app is in a subfolder (e.g., "app/"), change this once below
     env:
-      WORKDIR: .
+      WORKDIR: .   # change to a subfolder if your spec lives elsewhere
 
     steps:
       - name: Checkout repository
-      # v4 is the current stable checkout action
         uses: actions/checkout@v4
 
-      # Optional: cache Buildozer working dir to speed up subsequent builds.
-      # Safe to remove if you want fresh builds every time.
+      # Optional cache; safe to delete if you want fresh builds
       - name: Cache .buildozer directory (optional)
         uses: actions/cache@v4
         with:
@@ -43,14 +39,13 @@ jobs:
           restore-keys: |
             buildozer-${{ runner.os }}-
 
-      # Quick checks so you catch path issues early
       - name: Ensure buildozer.spec exists in WORKDIR
         run: |
           cd "$WORKDIR"
           test -f buildozer.spec || { echo "ERROR: $WORKDIR/buildozer.spec not found"; exit 1; }
           echo "buildozer.spec found in $WORKDIR"
 
-      # 👇 Your requested debug step (right before the build)
+      # 👇 Your debug step
       - name: Show workspace and first lines of buildozer.spec
         run: |
           cd "$WORKDIR"
@@ -61,7 +56,7 @@ jobs:
           echo "---- main.py first 20 lines ----"
           sed -n '1,20p' main.py || true
 
-      # Fail early if buildozer.spec isn't a valid INI with an [app] section
+      # Fail early if buildozer.spec isn't a valid INI with [app]
       - name: Validate buildozer.spec format
         run: |
           cd "$WORKDIR"
@@ -69,7 +64,9 @@ jobs:
           import configparser, sys
           from pathlib import Path
           p = Path("buildozer.spec")
-          first = p.read_text(encoding="utf-8", errors="ignore").splitlines()[0].strip() if p.exists() else ""
+          if not p.exists(): 
+              print("ERROR: buildozer.spec missing"); sys.exit(1)
+          first = p.read_text(encoding="utf-8", errors="ignore").splitlines()[0].strip()
           if not first.startswith("["):
               print(f"ERROR: buildozer.spec must start with a section header like [app]. Found: {first!r}")
               sys.exit(1)
@@ -81,21 +78,22 @@ jobs:
           print("buildozer.spec looks OK.")
           PY
 
-      # 🔧 Build with Buildozer inside a Dockerized environment
+      # 🔧 Build inside Dockerized Buildozer action
       - name: Build with Buildozer (debug)
         uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        env:
+          USER: root                     # ✅ fix for chown: invalid user
         with:
-          workdir: ${{ env.WORKDIR }}     # change if your files are in a subfolder
-          command: android debug          # for release: "android release"
-          # buildozer_version: latest     # optional: pin a version or leave default
+          workdir: ${{ env.WORKDIR }}    # where buildozer.spec lives
+          command: android debug         # for release: android release
+          # buildozer_version: stable    # optional (default is "stable")
 
-      # Helpful listing for diagnosing the path to the APK
       - name: List build artifacts
         run: |
           cd "$WORKDIR"
           ls -la bin || true
 
-      # Extract version (from [app] version = ... in buildozer.spec)
       - name: Extract app version
         id: get_version
         run: |
@@ -110,21 +108,18 @@ jobs:
               f.write(f"version={ver}\n")
           PY
 
-      # (Optional) Rename the APK to a friendly name with version
       - name: Rename APK (friendly name)
         run: |
           cd "$WORKDIR"
           set -x
           ver="${{ steps.get_version.outputs.version }}"
           shopt -s nullglob
-          # Try common debug APK patterns; adjust if needed
           for f in bin/*-debug*.apk bin/*.apk; do
             new="bin/dualclocks-v${ver}-debug.apk"
             mv -f "$f" "$new" && echo "Renamed to $new" && break
           done
           ls -la bin
 
-      # Upload the APK as a GitHub Actions artifact (downloadable from the run)
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -132,12 +127,3 @@ jobs:
           path: ${{ env.WORKDIR }}/bin/*.apk
           if-no-files-found: error
           retention-days: 7
-
-      # If you also build an AAB (Android App Bundle), upload it too:
-      # - name: Upload AAB artifact
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: dualclocks-aab-${{ steps.get_version.outputs.version }}
-      #     path: ${{ env.WORKDIR }}/bin/*.aab
-      #     if-no-files-found: ignore
-      #     retention-days: 7
