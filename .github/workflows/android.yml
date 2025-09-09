@@ -8,7 +8,6 @@ on:
 jobs:
   build-android:
     runs-on: ubuntu-latest
-    # (Optional) Give the job more time on first builds
     timeout-minutes: 120
 
     steps:
@@ -19,21 +18,54 @@ jobs:
         id: buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         env:
-          USER: root                  # avoid chown to a non-existent 'user'
+          USER: root                  # avoid chown to non-existent 'user'
           HOME_DIR: /root             # align HOME with chosen user
-          APP_ANDROID_ARCH: arm64-v8a # build only 64-bit ARM (faster/smaller)
+          APP_ANDROID_ARCH: arm64-v8a # build only 64‑bit ARM (faster/smaller)
           PIP_BREAK_SYSTEM_PACKAGES: "1"  # harmless here; venv is exempt anyway
         with:
-          workdir: .                  # change if your buildozer.spec is in a subfolder
-          buildozer_version: ""       # skip action's internal install; we'll use our venv
-          command: >-
-            python3 -m venv .ci-venv &&
-            . .ci-venv/bin/activate &&
-            python -m pip install --upgrade pip setuptools wheel Cython buildozer &&
-            python -c "import sys, Cython; print('Cython', Cython.__version__, 'Python', sys.executable)" &&
-            python -m buildozer -v android debug
+          workdir: .
+          buildozer_version: ""       # skip internal install; we'll use our venv
+          command: |
+            set -eux
 
-      - name: Upload APK artifact
+            echo "== Create isolated venv =="
+            python3 -m venv .ci-venv
+            . .ci-venv/bin/activate
+
+            echo "== Install host build deps (pin Cython for pyjnius compatibility) =="
+            python -m pip install --upgrade pip setuptools wheel
+            python -m pip install "Cython<3" buildozer
+
+            echo "== Sanity: print versions =="
+            python --version
+            python -c "import Cython, sys; print('Cython', Cython.__version__, 'Python', sys.executable)"
+
+            echo "== Build APK (verbose) =="
+            # If you want even more diagnostics, set log_level = 2 in buildozer.spec
+            python -m buildozer -v android debug || {
+              echo "Buildozer command failed; trying to collect logs..."
+              # Try to print the last 300 lines of the most recent p4a/buildozer logs to the console
+              find .buildozer -type f -name "*.log" -print || true
+              LASTLOG=$(ls -t .buildozer/android/platform/*/*/*/*/*.log 2>/dev/null | head -n 1 || true)
+              if [ -n "$LASTLOG" ]; then
+                echo "== Tail of $LASTLOG =="
+                tail -n 300 "$LASTLOG" || true
+              fi
+              exit 1
+            }
+
+      # Always upload logs so we have context if anything fails
+      - name: Upload Buildozer logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildozer-logs
+          path: |
+            .buildozer/android/platform/**/logs/**
+            .buildozer/*.log
+          if-no-files-found: ignore
+
+      - name: Upload APK artifact (on success)
         if: success()
         uses: actions/upload-artifact@v4
         with:
