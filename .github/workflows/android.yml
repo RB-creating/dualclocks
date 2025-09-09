@@ -13,59 +13,98 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false   # avoid leftover extraheader in .git/config
 
-      - name: Build with Buildozer (self-contained venv)
+      - name: Build with Buildozer (self-contained venv, full logs)
         id: buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         env:
           USER: root                  # avoid chown to non-existent 'user'
           HOME_DIR: /root             # align HOME with chosen user
-          APP_ANDROID_ARCH: arm64-v8a # build only 64‑bit ARM (faster/smaller)
-          PIP_BREAK_SYSTEM_PACKAGES: "1"  # harmless here; venv is exempt anyway
+          APP_ANDROID_ARCH: arm64-v8a # 64-bit ARM only (faster/smaller)
+          PIP_BREAK_SYSTEM_PACKAGES: "1"  # safe default; venv is exempt anyway
         with:
           workdir: .
-          buildozer_version: ""       # skip internal install; we'll use our venv
+          # Let the action install Buildozer so its internal patches apply
+          # (avoids the "Cannot apply patches to buildozer" annotation)
+          buildozer_version: stable
           command: |
             set -eux
 
-            echo "== Create isolated venv =="
+            echo "== Create isolated venv and install host tools =="
             python3 -m venv .ci-venv
             . .ci-venv/bin/activate
-
-            echo "== Install host build deps (pin Cython for pyjnius compatibility) =="
             python -m pip install --upgrade pip setuptools wheel
+            # Pin Cython <3 for best pyjnius compatibility; install buildozer
             python -m pip install "Cython<3" buildozer
 
-            echo "== Sanity: print versions =="
+            echo "== Ensure tzdata is included and improve logging/p4a branch =="
+            python - <<'PY'
+import re, pathlib
+p = pathlib.Path("buildozer.spec")
+t = p.read_text(encoding="utf-8")
+
+def set_kv(s, key, value):
+    import re
+    pat = re.compile(rf"^\s*{re.escape(key)}\s*=.*$", re.M)
+    repl = f"{key} = {value}"
+    return re.sub(pat, repl, s) if pat.search(s) else s + f"\n{repl}\n"
+
+# Verbose logs
+t = set_kv(t, "log_level", "2")
+# Use up-to-date python-for-android fixes (often needed for modern APIs/tools)
+t = set_kv(t, "p4a.branch", "develop")
+# Baseline requirements with tzdata so zoneinfo works on Android
+t = re.sub(r"(?m)^\s*requirements\s*=.*$",
+           "requirements = python3, kivy==2.3.0, tzdata", t)
+
+pathlib.Path("buildozer.spec").write_text(t, encoding="utf-8")
+print("Patched buildozer.spec: p4a.branch=develop, log_level=2, tzdata included.")
+PY
+
+            echo "== Print key versions =="
             python --version
             python -c "import Cython, sys; print('Cython', Cython.__version__, 'Python', sys.executable)"
+            python -m buildozer --version || true
 
-            echo "== Build APK (verbose) =="
-            # If you want even more diagnostics, set log_level = 2 in buildozer.spec
-            python -m buildozer -v android debug || {
-              echo "Buildozer command failed; trying to collect logs..."
-              # Try to print the last 300 lines of the most recent p4a/buildozer logs to the console
-              find .buildozer -type f -name "*.log" -print || true
-              LASTLOG=$(ls -t .buildozer/android/platform/*/*/*/*/*.log 2>/dev/null | head -n 1 || true)
-              if [ -n "$LASTLOG" ]; then
-                echo "== Tail of $LASTLOG =="
-                tail -n 300 "$LASTLOG" || true
-              fi
-              exit 1
-            }
+            echo "== Build (capture full console output) =="
+            set +e
+            python -m buildozer -v android debug 2>&1 | tee buildozer_console.log
+            status=${PIPESTATUS[0]}
+            set -e
 
-      # Always upload logs so we have context if anything fails
-      - name: Upload Buildozer logs (always)
+            echo "== HEAD of console log (first 200 lines) =="
+            head -n 200 buildozer_console.log || true
+            echo "== TAIL of console log (last 200 lines) =="
+            tail -n 200 buildozer_console.log || true
+
+            # Try to show latest internal p4a/build logs as well
+            echo "== Try to show latest internal p4a/build logs =="
+            LASTLOG=$(ls -t .buildozer/android/platform/**/**/*.log 2>/dev/null | head -n 1 || true)
+            if [ -n "$LASTLOG" ]; then
+              echo "== Tail of $LASTLOG =="
+              tail -n 200 "$LASTLOG" || true
+            fi
+
+            if [ "$status" -ne 0 ]; then
+              echo "::error::Build failed. See console/log artifacts for the first error."
+              exit "$status"
+            fi
+
+      - name: Upload logs (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: buildozer-logs
           path: |
-            .buildozer/android/platform/**/logs/**
-            .buildozer/*.log
+            buildozer_console.log
+            .buildozer/**/*.log
+            .buildozer/**/*.txt
+            .buildozer/**/logs/**
           if-no-files-found: ignore
 
-      - name: Upload APK artifact (on success)
+      - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
