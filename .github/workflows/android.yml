@@ -17,10 +17,11 @@ jobs:
         id: buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         env:
-          USER: root      # avoid chown to a non-existent 'user'
-          HOME_DIR: /root # keep HOME consistent with the chosen user
+          USER: root        # prevents 'invalid user: user' error in the container
+          HOME_DIR: /root   # keep HOME aligned with the chosen user
+          APP_ANDROID_ARCH: arm64-v8a  # build only 64-bit ARM (faster/smaller)
         with:
-          workdir: .
+          workdir: .                 # change if your buildozer.spec is in a subfolder
           buildozer_version: stable
           command: buildozer -v android debug
 
