@@ -8,6 +8,9 @@ on:
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    # (Optional) Give the job more time on first builds
+    timeout-minutes: 120
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,20 +19,22 @@ jobs:
         id: buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         env:
-          USER: root
-          HOME_DIR: /root
-          APP_ANDROID_ARCH: arm64-v8a
-          PIP_BREAK_SYSTEM_PACKAGES: "1"
+          USER: root                  # avoid chown to a non-existent 'user'
+          HOME_DIR: /root             # align HOME with chosen user
+          APP_ANDROID_ARCH: arm64-v8a # build only 64-bit ARM (faster/smaller)
+          PIP_BREAK_SYSTEM_PACKAGES: "1"  # harmless here; venv is exempt anyway
         with:
-          workdir: .
-          buildozer_version: ""      # skip internal install; we install in our venv
+          workdir: .                  # change if your buildozer.spec is in a subfolder
+          buildozer_version: ""       # skip action's internal install; we'll use our venv
           command: >-
             python3 -m venv .ci-venv &&
             . .ci-venv/bin/activate &&
-            python -m pip install --upgrade pip setuptools wheel buildozer &&
+            python -m pip install --upgrade pip setuptools wheel Cython buildozer &&
+            python -c "import sys, Cython; print('Cython', Cython.__version__, 'Python', sys.executable)" &&
             python -m buildozer -v android debug
 
       - name: Upload APK artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: apk
