@@ -1,177 +1,28 @@
-name: Build Android APK (Kivy + Buildozer)
+name: Android APK
 
 on:
   push:
     branches: [ main ]
-    paths:
-      - "buildozer.spec"
-      - "**/*.py"
-      - "**/*.kv"
-      - "**/*.png"
-      - "**/*.jpg"
-      - "**/*.ttf"
-      - ".github/workflows/build-android.yml"
   pull_request:
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  build:
+  build-android:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-
-    env:
-      WORKDIR: .        # change if your app lives in a subfolder (e.g., app)
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false   # Avoids extraheader write/cleanup warnings
-          fetch-depth: 0
 
-      # Optional cache to speed up some parts of subsequent builds
-      - name: Cache .buildozer directory (optional)
-        uses: actions/cache@v4
-        with:
-          path: .buildozer
-          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            buildozer-${{ runner.os }}-
-
-      - name: Ensure buildozer.spec exists in WORKDIR
-        run: |
-          cd "$WORKDIR"
-          test -f buildozer.spec || { echo "ERROR: $WORKDIR/buildozer.spec not found"; exit 1; }
-
-      # Debug: show what the runner sees
-      - name: Show workspace and first lines of buildozer.spec/main.py
-        run: |
-          cd "$WORKDIR"
-          pwd
-          ls -la
-          echo "---- buildozer.spec first 30 lines ----"
-          sed -n '1,30p' buildozer.spec || true
-          echo "---- main.py first 30 lines ----"
-          sed -n '1,30p' main.py || true
-
-      # Validate INI format early
-      - name: Validate buildozer.spec format
-        run: |
-          cd "$WORKDIR"
-          python - <<'PY'
-          import configparser, sys, pathlib
-          p = pathlib.Path("buildozer.spec")
-          if not p.exists():
-              print("ERROR: buildozer.spec missing"); sys.exit(1)
-          first = p.read_text(encoding="utf-8", errors="ignore").splitlines()[0].strip()
-          if not first.startswith("["):
-              print(f"ERROR: buildozer.spec must start with [app], found: {first!r}")
-              sys.exit(1)
-          c = configparser.ConfigParser()
-          c.read("buildozer.spec", encoding="utf-8")
-          if "app" not in c.sections():
-              print("ERROR: [app] section missing from buildozer.spec")
-              sys.exit(1)
-          print("buildozer.spec looks OK.")
-          PY
-
-      # Show installed SDK components before we modify anything (diagnostics)
-      - name: Show installed Android SDK platforms (before)
-        run: |
-          echo "ANDROIDSDK = ${ANDROIDSDK:-<unset>}"
-          if [ -n "${ANDROIDSDK:-}" ] && [ -d "$ANDROIDSDK" ]; then
-            ls -la "$ANDROIDSDK" || true
-            if [ -x "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" ]; then
-              "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROIDSDK" --list | sed -n '1,120p' || true
-              ls -la "$ANDROIDSDK/platforms" || true
-            fi
-          fi
-
-      # ---- Build (installs cmdline-tools if missing, then installs platform 31) ----
-      - name: Build with Buildozer (debug)
+      - name: Build with Buildozer
+        id: buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
-        env:
-          USER: root
-          PIP_BREAK_SYSTEM_PACKAGES: "1"   # allow pip install in managed env (PEP 668)
         with:
-          workdir: ${{ env.WORKDIR }}
-          buildozer_version: "1.5.0"       # or "stable" ; set '' to skip installing Buildozer via pip
-          command: >
-            set -euxo pipefail;
-
-            # Ensure ANDROIDSDK dir exists
-            mkdir -p "$ANDROIDSDK";
-
-            # Install Android cmdline-tools if not present (for sdkmanager)
-            if [ ! -x "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" ]; then
-              echo "Installing Android cmdline-tools into $ANDROIDSDK/cmdline-tools/latest";
-              mkdir -p "$ANDROIDSDK/cmdline-tools";
-              cd /tmp;
-              curl -sSLo cmdtools.zip "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip";
-              (unzip -q cmdtools.zip || (apt-get update && apt-get install -y unzip && unzip -q cmdtools.zip));
-              mkdir -p "$ANDROIDSDK/cmdline-tools/latest";
-              mv cmdline-tools/* "$ANDROIDSDK/cmdline-tools/latest/";
-            fi;
-
-            # Accept licenses non-interactively
-            yes | "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROIDSDK" --licenses || true;
-
-            # Install the exact components we need for android.api = 31
-            "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROIDSDK" \
-              "platform-tools" "platforms;android-31" "build-tools;34.0.0";
-
-            # Verify installs (diagnostics)
-            "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROIDSDK" --list | sed -n '1,120p' || true;
-            ls -la "$ANDROIDSDK/platforms" || true;
-
-            # Build APK
-            buildozer -v android debug
-
-      - name: Show installed Android SDK platforms (after)
-        if: always()
-        run: |
-          "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROIDSDK" --list | sed -n '1,120p' || true
-          ls -la "$ANDROIDSDK/platforms" || true
-
-      - name: List build artifacts
-        run: |
-          cd "$WORKDIR"
-          ls -la bin || true
-
-      - name: Extract app version
-        id: get_version
-        run: |
-          cd "$WORKDIR"
-          python - <<'PY'
-          import os, configparser
-          c = configparser.ConfigParser()
-          c.read("buildozer.spec", encoding="utf-8")
-          ver = c.get("app", "version", fallback="0.0.0").strip()
-          print("Version:", ver)
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-            f.write(f"version={ver}\n")
-          PY
-
-      - name: Rename APK (friendly name)
-        run: |
-          cd "$WORKDIR"
-          set -x
-          ver="${{ steps.get_version.outputs.version }}"
-          shopt -s nullglob
-          for f in bin/*-debug*.apk bin/*.apk; do
-            new="bin/dualclocks-v${ver}-debug.apk"
-            mv -f "$f" "$new" && echo "Renamed to $new" && break
-          done
-          ls -la bin
+          workdir: .               # change if buildozer.spec is in a subfolder
+          buildozer_version: stable
+          command: buildozer -v android debug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dualclocks-debug-${{ steps.get_version.outputs.version }}
-          path: ${{ env.WORKDIR }}/bin/*.apk
-          if-no-files-found: error
-          retention-days: 7
+          name: apk
+          path: ${{ steps.buildozer.outputs.filename }}
