@@ -79,21 +79,13 @@ jobs:
       # ---- The build step inside the Dockerized Buildozer action ----
       - name: Build with Buildozer (debug)
         uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
         env:
-          USER: root                 # <- fixes "chown: invalid user" issue
-          PIP_DEFAULT_TIMEOUT: "180" # <- give pip more time on slow networks
+          USER: root
+          PIP_BREAK_SYSTEM_PACKAGES: "1"  # ✅ allow pip install in managed env
         with:
-          workdir: ${{ env.WORKDIR }}
-          buildozer_version: "1.5.0" # or "master" if you want the latest dev
-          # You can chain multiple commands with ';' (per action README)
-          command: >
-            python3 -V;
-            python3 -m pip --version;
-            python3 -m pip install --upgrade pip setuptools wheel;
-            python3 -m pip install --upgrade virtualenv Cython;
-            python3 -m buildozer --version || true;
-            buildozer -v android debug
+          workdir: .
+          buildozer_version: "1.5.0"      # or "stable"
+          command: buildozer -v android debug
 
       - name: List build artifacts
         run: |
