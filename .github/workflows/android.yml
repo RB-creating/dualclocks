@@ -27,34 +27,44 @@ jobs:
         with:
           workdir: .
           buildozer_version: stable
-          command: >-
-            set -eux &&
-            python3 -m venv .ci-venv &&
-            . .ci-venv/bin/activate &&
-            python -m pip install --upgrade pip setuptools wheel &&
-            python -m pip install "Cython<3" buildozer &&
-            # --- ensure buildozer.spec has the right knobs ---
+          command: |
+            set -eux
+
+            # Isolated venv; host tools for pyjnius build
+            python3 -m venv .ci-venv
+            . .ci-venv/bin/activate
+            python -m pip install --upgrade pip setuptools wheel
+            python -m pip install "Cython<3" buildozer
+
+            # Ensure buildozer.spec keys (no inline comments; keep POSIX sh)
             if grep -qE '^[[:space:]]*log_level[[:space:]]*=' buildozer.spec; then
-              sed -i 's/^[[:space:]]*log_level[[:space:]]*=.*/log_level = 2/' buildozer.spec;
+              sed -i 's/^[[:space:]]*log_level[[:space:]]*=.*/log_level = 2/' buildozer.spec
             else
-              printf '\nlog_level = 2\n' >> buildozer.spec;
-            fi &&
+              printf '\nlog_level = 2\n' >> buildozer.spec
+            fi
+
             if grep -qE '^[[:space:]]*p4a\.branch[[:space:]]*=' buildozer.spec; then
-              sed -i 's/^[[:space:]]*p4a\.branch[[:space:]]*=.*/p4a.branch = develop/' buildozer.spec;
+              sed -i 's/^[[:space:]]*p4a\.branch[[:space:]]*=.*/p4a.branch = develop/' buildozer.spec
             else
-              printf '\np4a.branch = develop\n' >> buildozer.spec;
-            fi &&
+              printf '\np4a.branch = develop\n' >> buildozer.spec
+            fi
+
             if grep -qE '^[[:space:]]*requirements[[:space:]]*=' buildozer.spec; then
-              sed -i 's/^[[:space:]]*requirements[[:space:]]*=.*/requirements = python3, kivy==2.3.0, tzdata/' buildozer.spec;
+              sed -i 's/^[[:space:]]*requirements[[:space:]]*=.*/requirements = python3, kivy==2.3.0, tzdata/' buildozer.spec
             else
-              printf '\nrequirements = python3, kivy==2.3.0, tzdata\n' >> buildozer.spec;
-            fi &&
-            # --- run build and capture console log ---
-            python -m buildozer --version &&
-            python -m buildozer -v android debug 2>&1 | tee buildozer_console.log;
-            status=${PIPESTATUS[0]};
-            head -n 200 buildozer_console.log || true;
-            tail -n 200 buildozer_console.log || true;
+              printf '\nrequirements = python3, kivy==2.3.0, tzdata\n' >> buildozer.spec
+            fi
+
+            # Build and capture logs WITHOUT a pipeline (dash-safe)
+            python -m buildozer --version || true
+            python -m buildozer -v android debug > buildozer_console.log 2>&1
+            status=$?
+
+            # Surface the important parts to the console
+            head -n 200 buildozer_console.log || true
+            tail -n 200 buildozer_console.log || true
+
+            # Exit with the actual Buildozer status
             exit $status
 
       - name: Upload logs (always)
