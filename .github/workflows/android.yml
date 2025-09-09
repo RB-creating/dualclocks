@@ -16,8 +16,11 @@ jobs:
       - name: Build with Buildozer
         id: buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
+        env:
+          USER: root      # avoid chown to a non-existent 'user'
+          HOME_DIR: /root # keep HOME consistent with the chosen user
         with:
-          workdir: .               # change if buildozer.spec is in a subfolder
+          workdir: .
           buildozer_version: stable
           command: buildozer -v android debug
 
