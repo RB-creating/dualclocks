@@ -24,13 +24,13 @@ jobs:
     timeout-minutes: 120
 
     env:
-      WORKDIR: .   # change to a subfolder if your spec lives elsewhere
+      WORKDIR: .              # change if your app lives in a subfolder
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Optional cache; safe to delete if you want fresh builds
+      # Optional cache; okay to remove if you want always-clean builds
       - name: Cache .buildozer directory (optional)
         uses: actions/cache@v4
         with:
@@ -43,32 +43,30 @@ jobs:
         run: |
           cd "$WORKDIR"
           test -f buildozer.spec || { echo "ERROR: $WORKDIR/buildozer.spec not found"; exit 1; }
-          echo "buildozer.spec found in $WORKDIR"
 
-      # 👇 Your debug step
+      # Debug: show what the runner sees
       - name: Show workspace and first lines of buildozer.spec
         run: |
           cd "$WORKDIR"
           pwd
           ls -la
-          echo "---- buildozer.spec first 20 lines ----"
-          sed -n '1,20p' buildozer.spec || true
-          echo "---- main.py first 20 lines ----"
-          sed -n '1,20p' main.py || true
+          echo "---- buildozer.spec first 30 lines ----"
+          sed -n '1,30p' buildozer.spec || true
+          echo "---- main.py first 30 lines ----"
+          sed -n '1,30p' main.py || true
 
-      # Fail early if buildozer.spec isn't a valid INI with [app]
+      # Validate INI format early
       - name: Validate buildozer.spec format
         run: |
           cd "$WORKDIR"
           python - <<'PY'
-          import configparser, sys
-          from pathlib import Path
-          p = Path("buildozer.spec")
-          if not p.exists(): 
+          import configparser, sys, pathlib
+          p = pathlib.Path("buildozer.spec")
+          if not p.exists():
               print("ERROR: buildozer.spec missing"); sys.exit(1)
           first = p.read_text(encoding="utf-8", errors="ignore").splitlines()[0].strip()
           if not first.startswith("["):
-              print(f"ERROR: buildozer.spec must start with a section header like [app]. Found: {first!r}")
+              print(f"ERROR: buildozer.spec must start with [app], found: {first!r}")
               sys.exit(1)
           c = configparser.ConfigParser()
           c.read("buildozer.spec", encoding="utf-8")
@@ -78,16 +76,24 @@ jobs:
           print("buildozer.spec looks OK.")
           PY
 
-      # 🔧 Build inside Dockerized Buildozer action
+      # ---- The build step inside the Dockerized Buildozer action ----
       - name: Build with Buildozer (debug)
         uses: ArtemSBulgakov/buildozer-action@v1
         id: buildozer
         env:
-          USER: root                     # ✅ fix for chown: invalid user
+          USER: root                 # <- fixes "chown: invalid user" issue
+          PIP_DEFAULT_TIMEOUT: "180" # <- give pip more time on slow networks
         with:
-          workdir: ${{ env.WORKDIR }}    # where buildozer.spec lives
-          command: android debug         # for release: android release
-          # buildozer_version: stable    # optional (default is "stable")
+          workdir: ${{ env.WORKDIR }}
+          buildozer_version: "1.5.0" # or "master" if you want the latest dev
+          # You can chain multiple commands with ';' (per action README)
+          command: >
+            python3 -V;
+            python3 -m pip --version;
+            python3 -m pip install --upgrade pip setuptools wheel;
+            python3 -m pip install --upgrade virtualenv Cython;
+            python3 -m buildozer --version || true;
+            buildozer -v android debug
 
       - name: List build artifacts
         run: |
