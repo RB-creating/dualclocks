@@ -14,83 +14,48 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          persist-credentials: false   # avoid leftover extraheader in .git/config
+          persist-credentials: false
 
       - name: Build with Buildozer (self-contained venv, full logs)
         id: buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         env:
-          USER: root                  # avoid chown to non-existent 'user'
-          HOME_DIR: /root             # align HOME with chosen user
-          APP_ANDROID_ARCH: arm64-v8a # 64-bit ARM only (faster/smaller)
-          PIP_BREAK_SYSTEM_PACKAGES: "1"  # safe default; venv is exempt anyway
+          USER: root
+          HOME_DIR: /root
+          APP_ANDROID_ARCH: arm64-v8a
+          PIP_BREAK_SYSTEM_PACKAGES: "1"
         with:
           workdir: .
-          # Let the action install Buildozer so its internal patches apply
-          # (avoids the "Cannot apply patches to buildozer" annotation)
           buildozer_version: stable
-          command: |
-            set -eux
-
-            echo "== Create isolated venv and install host tools =="
-            python3 -m venv .ci-venv
-            . .ci-venv/bin/activate
-            python -m pip install --upgrade pip setuptools wheel
-            # Pin Cython <3 for best pyjnius compatibility; install buildozer
-            python -m pip install "Cython<3" buildozer
-
-            echo "== Ensure tzdata is included and improve logging/p4a branch =="
-            python - <<'PY'
-import re, pathlib
-p = pathlib.Path("buildozer.spec")
-t = p.read_text(encoding="utf-8")
-
-def set_kv(s, key, value):
-    import re
-    pat = re.compile(rf"^\s*{re.escape(key)}\s*=.*$", re.M)
-    repl = f"{key} = {value}"
-    return re.sub(pat, repl, s) if pat.search(s) else s + f"\n{repl}\n"
-
-# Verbose logs
-t = set_kv(t, "log_level", "2")
-# Use up-to-date python-for-android fixes (often needed for modern APIs/tools)
-t = set_kv(t, "p4a.branch", "develop")
-# Baseline requirements with tzdata so zoneinfo works on Android
-t = re.sub(r"(?m)^\s*requirements\s*=.*$",
-           "requirements = python3, kivy==2.3.0, tzdata", t)
-
-pathlib.Path("buildozer.spec").write_text(t, encoding="utf-8")
-print("Patched buildozer.spec: p4a.branch=develop, log_level=2, tzdata included.")
-PY
-
-            echo "== Print key versions =="
-            python --version
-            python -c "import Cython, sys; print('Cython', Cython.__version__, 'Python', sys.executable)"
-            python -m buildozer --version || true
-
-            echo "== Build (capture full console output) =="
-            set +e
-            python -m buildozer -v android debug 2>&1 | tee buildozer_console.log
-            status=${PIPESTATUS[0]}
-            set -e
-
-            echo "== HEAD of console log (first 200 lines) =="
-            head -n 200 buildozer_console.log || true
-            echo "== TAIL of console log (last 200 lines) =="
-            tail -n 200 buildozer_console.log || true
-
-            # Try to show latest internal p4a/build logs as well
-            echo "== Try to show latest internal p4a/build logs =="
-            LASTLOG=$(ls -t .buildozer/android/platform/**/**/*.log 2>/dev/null | head -n 1 || true)
-            if [ -n "$LASTLOG" ]; then
-              echo "== Tail of $LASTLOG =="
-              tail -n 200 "$LASTLOG" || true
-            fi
-
-            if [ "$status" -ne 0 ]; then
-              echo "::error::Build failed. See console/log artifacts for the first error."
-              exit "$status"
-            fi
+          command: >-
+            set -eux &&
+            python3 -m venv .ci-venv &&
+            . .ci-venv/bin/activate &&
+            python -m pip install --upgrade pip setuptools wheel &&
+            python -m pip install "Cython<3" buildozer &&
+            # --- ensure buildozer.spec has the right knobs ---
+            if grep -qE '^[[:space:]]*log_level[[:space:]]*=' buildozer.spec; then
+              sed -i 's/^[[:space:]]*log_level[[:space:]]*=.*/log_level = 2/' buildozer.spec;
+            else
+              printf '\nlog_level = 2\n' >> buildozer.spec;
+            fi &&
+            if grep -qE '^[[:space:]]*p4a\.branch[[:space:]]*=' buildozer.spec; then
+              sed -i 's/^[[:space:]]*p4a\.branch[[:space:]]*=.*/p4a.branch = develop/' buildozer.spec;
+            else
+              printf '\np4a.branch = develop\n' >> buildozer.spec;
+            fi &&
+            if grep -qE '^[[:space:]]*requirements[[:space:]]*=' buildozer.spec; then
+              sed -i 's/^[[:space:]]*requirements[[:space:]]*=.*/requirements = python3, kivy==2.3.0, tzdata/' buildozer.spec;
+            else
+              printf '\nrequirements = python3, kivy==2.3.0, tzdata\n' >> buildozer.spec;
+            fi &&
+            # --- run build and capture console log ---
+            python -m buildozer --version &&
+            python -m buildozer -v android debug 2>&1 | tee buildozer_console.log;
+            status=${PIPESTATUS[0]};
+            head -n 200 buildozer_console.log || true;
+            tail -n 200 buildozer_console.log || true;
+            exit $status
 
       - name: Upload logs (always)
         if: always()
