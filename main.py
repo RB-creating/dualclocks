@@ -1,525 +1,272 @@
-from datetime import datetime, timezone
-from math import sin, cos, pi
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-# Try to import ZoneInfo; if unavailable, we fall back gracefully to UTC.
-try:
-    from zoneinfo import ZoneInfo  # Python 3.9+
-except Exception:
-    ZoneInfo = None
+# =====================================================================
+# === Crash popup installer (put this at the VERY TOP of main.py) =====
+# Shows a scrollable popup with the traceback for any uncaught exception.
+# Also writes the traceback to <app.user_data_dir>/last_crash.txt.
+# Remove when you're done debugging.
+# =====================================================================
 
-from kivy.app import App
-from kivy.uix.widget import Widget
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.anchorlayout import AnchorLayout
-from kivy.uix.label import Label
-from kivy.uix.button import Button
-from kivy.uix.spinner import Spinner, SpinnerOption
-from kivy.clock import Clock as KivyClock, Clock
-from kivy.properties import StringProperty, ListProperty, NumericProperty, BooleanProperty
-from kivy.graphics import Color, Ellipse, Line
-from kivy.core.window import Window
-from kivy.metrics import dp
-from kivy.logger import Logger
+import sys, os, traceback, threading
 
-# -------- Global UI constants --------
-Window.clearcolor = (1, 1, 1, 1)   # white background
-COMPACT_BREAKPOINT_DP = 740        # ~phones in landscape
+def _install_crash_popup():
+    from kivy.clock import Clock
 
-# ---- Time zone list & helpers ----
-COMMON_TZS = (
-    # Americas
-    "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York",
-    "America/Phoenix", "America/Anchorage", "America/Adak", "Pacific/Honolulu",
-    "America/Tijuana", "America/Mexico_City", "America/Bogota", "America/Lima",
-    "America/Caracas", "America/Santiago", "America/Argentina/Buenos_Aires",
-    "America/Sao_Paulo",
-    # Europe
-    "Europe/London", "Europe/Dublin", "Europe/Lisbon", "Europe/Madrid",
-    "Europe/Paris", "Europe/Berlin", "Europe/Rome", "Europe/Zurich",
-    "Europe/Amsterdam", "Europe/Stockholm", "Europe/Copenhagen",
-    "Europe/Warsaw", "Europe/Athens", "Europe/Helsinki",
-    "Europe/Bucharest", "Europe/Moscow",
-    # Africa
-    "Africa/Casablanca", "Africa/Accra", "Africa/Lagos", "Africa/Johannesburg",
-    "Africa/Nairobi",
-    # Middle East / Asia
-    "Asia/Jerusalem", "Asia/Dubai", "Asia/Tehran", "Asia/Karachi", "Asia/Kolkata",
-    "Asia/Dhaka", "Asia/Bangkok", "Asia/Singapore", "Asia/Hong_Kong",
-    "Asia/Shanghai", "Asia/Tokyo", "Asia/Seoul",
-    # Oceania / Australia
-    "Australia/Perth", "Australia/Adelaide", "Australia/Sydney",
-    "Pacific/Auckland",
-)
-
-def friendly_label_from_tz(tzname: str) -> str:
-    if not tzname:
-        return "UTC"
-    last = tzname.split("/")[-1]
-    return last.replace("_", " ")
-
-def build_friendly_lists(tzs):
-    entries = []
-    for tz in tzs:
-        parts = tz.split("/")
-        city = parts[-1].replace("_", " ")
-        region = parts[-2].replace("_", " ") if len(parts) > 1 else ""
-        entries.append((tz, city, region))
-
-    counts = {}
-    for _, city, _ in entries:
-        counts[city] = counts.get(city, 0) + 1
-
-    items = []
-    for tz, city, region in entries:
-        label = f"{city} ({region})" if counts[city] > 1 and region else city
-        items.append((tz, label))
-
-    tz_to_friendly = {tz: label for tz, label in items}
-    friendly_to_tz = {label: tz for tz, label in items}
-    friendly_values = tuple(label for _, label in items)
-    return tz_to_friendly, friendly_to_tz, friendly_values
-
-TZ_TO_FRIENDLY, FRIENDLY_TO_TZ, FRIENDLY_VALUES = build_friendly_lists(COMMON_TZS)
-
-def _resolve_tz(name: str):
-    if ZoneInfo is not None:
+    # Resolve a writable path early (before App is created)
+    def _get_user_data_dir_fallback():
         try:
-            return ZoneInfo(name)
-        except Exception as e:
-            Logger.warning(f"AnalogClock: ZoneInfo could not resolve '{name}': {e}")
-    return None  # use UTC fallback
+            from kivy.app import App
+            app = App.get_running_app()
+            if app and getattr(app, "user_data_dir", None):
+                return app.user_data_dir
+        except Exception:
+            pass
+        # Fallback to HOME; on Android this is under /data/data/<pkg>/files after App init
+        return os.path.expanduser("~")
 
-def _offset_seconds_for_tz(tzname: str) -> int:
-    tz = _resolve_tz(tzname)
+    def _write_last_crash(msg: str):
+        try:
+            base = _get_user_data_dir_fallback()
+            os.makedirs(base, exist_ok=True)
+            path = os.path.join(base, "last_crash.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(msg)
+        except Exception:
+            # Don't let logging failures crash the app
+            pass
+
+    def _show_popup_async(msg: str):
+        # Defer UI creation to the next frame (ensures Window/UI exists)
+        def _do_show(_dt):
+            try:
+                from kivy.uix.popup import Popup
+                from kivy.uix.label import Label
+                from kivy.uix.scrollview import ScrollView
+                from kivy.uix.boxlayout import BoxLayout
+                from kivy.uix.button import Button
+                from kivy.metrics import dp
+                from kivy.core.clipboard import Clipboard
+
+                # Root container
+                root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+
+                # Scrollable traceback text
+                lbl = Label(
+                    text=msg,
+                    font_size="12sp",
+                    size_hint=(1, None),
+                    markup=False,
+                    halign="left",
+                    valign="top",
+                )
+                # Make label tall so it can scroll
+                def _sync_height(*_):
+                    # Ensure we don't end up with 0 height before first texture update
+                    h = lbl.texture_size[1] if lbl.texture_size[1] > 0 else dp(400)
+                    lbl.height = max(h, dp(1200))
+                    lbl.text_size = (lbl.width - dp(16), None)
+                lbl.bind(texture_size=_sync_height, size=_sync_height)
+
+                scroller = ScrollView(size_hint=(1, 1), bar_width=dp(6))
+                scroller.add_widget(lbl)
+
+                # Buttons
+                btns = BoxLayout(size_hint=(1, None), height=dp(48), spacing=dp(8))
+                copy_btn = Button(text="Copy", size_hint=(1, 1))
+                close_btn = Button(text="Close", size_hint=(1, 1))
+                btns.add_widget(copy_btn)
+                btns.add_widget(close_btn)
+
+                root.add_widget(scroller)
+                root.add_widget(btns)
+
+                popup = Popup(
+                    title="Python Error",
+                    content=root,
+                    size_hint=(0.95, 0.95),
+                    auto_dismiss=False,
+                )
+
+                def _copy(_):
+                    try:
+                        Clipboard.copy(msg)
+                    except Exception:
+                        pass
+
+                copy_btn.bind(on_release=_copy)
+                close_btn.bind(on_release=lambda *_: popup.dismiss())
+
+                popup.open()
+            except Exception:
+                # Last resort: print to stdout (visible in logcat)
+                print(msg)
+        Clock.schedule_once(_do_show, 0)
+
+    def _format_exc(exc_type, exc, tb):
+        msg = "".join(traceback.format_exception(exc_type, exc, tb))
+        # Trim super long traces
+        return msg[-8000:]
+
+    # --- Global excepthook (main thread) ---
+    def _global_excepthook(exc_type, exc, tb):
+        msg = _format_exc(exc_type, exc, tb)
+        _write_last_crash(msg)
+        _show_popup_async(msg)
+        print(msg)
+
+    sys.excepthook = _global_excepthook
+
+    # --- Thread excepthook (Python 3.8+) ---
+    if hasattr(threading, "excepthook"):
+        def _thread_excepthook(args):
+            _global_excepthook(args.exc_type, args.exc_value, args.exc_traceback)
+        threading.excepthook = _thread_excepthook
+
+    # --- Catch many Kivy callback errors via ExceptionManager ---
     try:
-        if tz is None:
-            return 0
-        now = datetime.now(tz)
-        off = now.utcoffset()
-        return int(off.total_seconds()) if off else 0
-    except Exception as e:
-        Logger.exception(f"AnalogClock: failed to get offset for '{tzname}': {e}")
-        return 0
+        from kivy.base import ExceptionManager, ExceptionHandler
 
-# ---- Light green Spinner styles ----
-LIGHT_GREEN_BTN = (0.88, 1.00, 0.88, 1.0)
-LIGHT_GREEN_OPT = (0.92, 1.00, 0.92, 1.0)
-DARK_TEXT = (0.10, 0.10, 0.10, 1.0)
-BRIGHT_GREEN = (0.00, 0.80, 0.00, 1.0)
-BRIGHT_RED = (0.95, 0.00, 0.00, 1.0)
+        class _PopupExceptionHandler(ExceptionHandler):
+            def handle_exception(self, inst):
+                _global_excepthook(type(inst), inst, inst.__traceback__)
+                # Allow Kivy to continue handling as usual
+                return ExceptionManager.PASS
 
-class LightSpinnerOption(SpinnerOption):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.background_normal = ''
-        self.background_down = ''
-        self.background_color = LIGHT_GREEN_OPT
-        self.color = DARK_TEXT
-
-def style_spinner(sp: Spinner):
-    sp.background_normal = ''
-    sp.background_down = ''
-    sp.background_color = LIGHT_GREEN_BTN
-    sp.color = DARK_TEXT
-    sp.option_cls = LightSpinnerOption
-    # Avoid features that may differ by Kivy version on Android (e.g., shorten)
-    # Keep text within spinner width if supported
-    try:
-        sp.text_size = (sp.width - dp(8), None)
-        sp.bind(size=lambda s, *_: setattr(s, "text_size", (s.width - dp(8), None)))
+        ExceptionManager.add_handler(_PopupExceptionHandler())
     except Exception:
+        # If Kivy isn't ready yet, it's fine—global hooks still work
         pass
 
-# ---- Arrow widget ----
-class ArrowWidget(Widget):
-    direction = StringProperty('right')  # keep 'right'
-    color = ListProperty(BRIGHT_GREEN)
-    thickness = NumericProperty(dp(2.0))
+# Install immediately when this file is imported
+_install_crash_popup()
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        with self.canvas:
-            self._color = Color(rgba=self.color)
-            self._shaft = Line(points=[], width=self.thickness, cap='round')
-            self._head1 = Line(points=[], width=self.thickness, cap='round')
-            self._head2 = Line(points=[], width=self.thickness, cap='round')
-        self.bind(pos=self._update, size=self._update,
-                  color=self._apply_color, thickness=self._apply_thickness)
+# ========================= End crash popup installer ==========================
 
-    def _apply_color(self, *_): self._color.rgba = self.color
-    def _apply_thickness(self, *_):
-        self._shaft.width = self.thickness
-        self._head1.width = self.thickness
-        self._head2.width = self.thickness
-        self._update()
 
-    def _update(self, *_):
-        if self.width <= 0 or self.height <= 0:
-            return
-        pad = dp(6)
-        head = min(dp(14), self.width * 0.28)
-        y = self.y + self.height / 2.0
-        xL = self.x + pad
-        xR = self.right - pad
-        self._shaft.points = [xL, y, xR - head, y]
-        self._head1.points = [xR, y, xR - head, y + head * 0.6]
-        self._head2.points = [xR, y, xR - head, y - head * 0.6]
+# =====================================================================
+# === Timezone helper (zoneinfo with pytz fallback; never crashes) ====
+# Keep tzdata in buildozer.spec requirements if you use zoneinfo:
+#   requirements = python3,kivy==2.3.0,tzdata
+# Optionally add pytz for extra fallback:
+#   requirements = python3,kivy==2.3.0,tzdata,pytz
+# =====================================================================
 
-# ---- Analog clock widget ----
-class AnalogClock(Widget):
-    tzname = StringProperty("UTC")
-    label = StringProperty("Zone")
-    face_color = ListProperty([1, 1, 1, 1])
-    tick_color = ListProperty([0.1, 0.1, 0.1, 1])
-    hour_hand_color = ListProperty([0.1, 0.1, 0.1, 1])
-    minute_hand_color = ListProperty([0.1, 0.1, 0.1, 1])
-    second_hand_color = ListProperty([0.8, 0.0, 0.0, 1])
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+    _ZONEINFO_OK = True
+except Exception:
+    ZoneInfo = None
+    _ZONEINFO_OK = False
 
-    hour = NumericProperty(0.0)
-    minute = NumericProperty(0.0)
-    second = NumericProperty(0.0)
-    _warned_tz = BooleanProperty(False)
-
-    def __init__(self, **kwargs):
-        if "size" not in kwargs and ("size_hint" not in kwargs or kwargs.get("size_hint") is None):
-            kwargs.setdefault("size_hint", (None, None))
-            kwargs.setdefault("size", (dp(240), dp(240)))  # slightly smaller default
-        super().__init__(**kwargs)
-
-        with self.canvas.before:
-            self._face_color_instr = Color(rgba=self.face_color)
-            self._face_ellipse = Ellipse()
-
-        with self.canvas:
-            self._minute_tick_color_instr = Color(rgba=(0.7, 0.7, 0.7, 1))
-            self._minute_ticks = [Line(points=[0, 0, 0, 0], width=dp(1)) for _ in range(60)]
-            self._tick_color_instr = Color(rgba=self.tick_color)
-            self._tick_marks = [Line(points=[0, 0, 0, 0], width=dp(2)) for _ in range(12)]
-            self._hour_color_instr = Color(rgba=self.hour_hand_color)
-            self._hour_hand = Line(points=[], width=dp(4), cap='round')
-            self._minute_color_instr = Color(rgba=self.minute_hand_color)
-            self._minute_hand = Line(points=[], width=dp(3), cap='round')
-            self._second_color_instr = Color(rgba=self.second_hand_color)
-            self._second_hand = Line(points=[], width=dp(1.5), cap='round')
-
-        with self.canvas.after:
-            self._hub_color_instr = Color(rgba=(0.1, 0.1, 0.1, 1))
-            self._hub = Ellipse(size=(dp(10), dp(10)))
-
-        # Numerals
-        self._lbl12 = Label(text='12', color=DARK_TEXT, font_size='18sp', size_hint=(None, None))
-        self._lbl3  = Label(text='3',  color=DARK_TEXT, font_size='18sp', size_hint=(None, None))
-        self._lbl6  = Label(text='6',  color=DARK_TEXT, font_size='18sp', size_hint=(None, None))
-        self._lbl9  = Label(text='9',  color=DARK_TEXT, font_size='18sp', size_hint=(None, None))
-        for lbl in (self._lbl12, self._lbl3, self._lbl6, self._lbl9):
-            lbl.texture_update()
-            lbl.size = lbl.texture_size
-            self.add_widget(lbl)
-
-        self.bind(pos=self._update_geometry, size=self._update_geometry,
-                  face_color=self._apply_face_color, tick_color=self._apply_tick_color,
-                  hour_hand_color=self._apply_hour_color, minute_hand_color=self._apply_minute_color,
-                  second_hand_color=self._apply_second_color,
-                  hour=self._update_hands, minute=self._update_hands, second=self._update_hands)
-
-        self._tz = _resolve_tz(self.tzname)
-        self._evt = KivyClock.schedule_interval(self._update_time, 1.0)
-        self._update_geometry()
-        self._update_time(0)
-
-    def _apply_face_color(self, *_):   self._face_color_instr.rgba = self.face_color
-    def _apply_tick_color(self, *_):   self._tick_color_instr.rgba = self.tick_color
-    def _apply_hour_color(self, *_):   self._hour_color_instr.rgba = self.hour_hand_color
-    def _apply_minute_color(self, *_): self._minute_color_instr.rgba = self.minute_hand_color
-    def _apply_second_color(self, *_): self._second_color_instr.rgba = self.second_hand_color
-
-    def _update_geometry(self, *_):
-        inset = dp(6)
-        d = max(0.0, min(self.width, self.height) - 2 * inset)
-        cx, cy = self.center
-        radius = d / 2.0
-
-        self._face_ellipse.size = (d, d)
-        self._face_ellipse.pos = (cx - radius, cy - radius)
-
-        for j, mt in enumerate(self._minute_ticks):
-            angle = 2 * pi * j / 60.0
-            if j % 5 == 0:
-                x = cx + 0.90 * radius * sin(angle)
-                y = cy + 0.90 * radius * cos(angle)
-                mt.points = [x, y, x, y]
-            else:
-                x1 = cx + 0.88 * radius * sin(angle)
-                y1 = cy + 0.88 * radius * cos(angle)
-                x2 = cx + 0.97 * radius * sin(angle)
-                y2 = cy + 0.97 * radius * cos(angle)
-                mt.points = [x1, y1, x2, y2]
-
-        for i, tick in enumerate(self._tick_marks):
-            angle = 2 * pi * i / 12.0
-            x1 = cx + 0.80 * radius * sin(angle)
-            y1 = cy + 0.80 * radius * cos(angle)
-            x2 = cx + 0.98 * radius * sin(angle)
-            y2 = cy + 0.98 * radius * cos(angle)
-            tick.points = [x1, y1, x2, y2]
-
-        hub_r = dp(5)
-        self._hub.size = (2 * hub_r, 2 * hub_r)
-        self._hub.pos = (cx - hub_r, cy - hub_r)
-
-        r_numeral = 0.72 * radius
-        self._lbl12.center = (cx,            cy + r_numeral)
-        self._lbl3.center  = (cx + r_numeral, cy)
-        self._lbl6.center  = (cx,            cy - r_numeral)
-        self._lbl9.center  = (cx - r_numeral, cy)
-
-        self._update_hands()
-
-    def on_tzname(self, *_):
-        self._tz = _resolve_tz(self.tzname)
-        self._warned_tz = False
-
-    def on_parent(self, *args):
-        if self.parent is None and getattr(self, "_evt", None):
-            self._evt.cancel()
-            self._evt = None
-
-    def _update_time(self, dt):
+def get_tz(name: str):
+    """Return a tzinfo for 'name' using zoneinfo or pytz; fallback to UTC."""
+    if _ZONEINFO_OK:
         try:
-            if self._tz is not None:
-                now = datetime.now(self._tz)
-            else:
-                if not self._warned_tz:
-                    Logger.warning(f"AnalogClock: Falling back to UTC for '{self.tzname}'. "
-                                   f"Install 'tzdata' to enable IANA timezones.")
-                self._warned_tz = True
-                now = datetime.now(timezone.utc)
+            return ZoneInfo(name)
+        except Exception:
+            pass
+    try:
+        import pytz
+        return pytz.timezone(name)
+    except Exception:
+        pass
+    from datetime import timezone
+    return timezone.utc
+
+
+# =====================================================================
+# === Demo Kivy app (you can replace this section with your own) ======
+# This minimal UI proves the crash popup + timezone helper work.
+# =====================================================================
+
+import kivy
+kivy.require("2.3.0")
+
+from datetime import datetime
+from kivy.app import App
+from kivy.core.window import Window
+from kivy.clock import Clock
+from kivy.logger import Logger
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label
+from kivy.lang import Builder
+import os
+
+# Optional: white background so black-screen vs. crash is obvious
+Window.clearcolor = (1, 1, 1, 1)
+
+# If you keep a KV file, we can autoload it safely if present.
+# If your App class is DualClocksApp, Kivy would auto-load dualclocks.kv.
+# This explicit loader only runs if the file exists, so it won't crash.
+for kv_name in ("dualclocks.kv", "main.kv"):
+    if os.path.isfile(kv_name):
+        try:
+            Builder.load_file(kv_name)
+            Logger.info(f"KV: Loaded {kv_name}")
+            break
         except Exception as e:
-            Logger.exception(f"AnalogClock: time update failed for '{self.tzname}': {e}")
-            now = datetime.now(timezone.utc)
+            Logger.exception(f"KV: Failed to load {kv_name}: {e}")
 
-        self.second = now.second
-        self.minute = now.minute + self.second / 60.0
-        self.hour = (now.hour % 12) + self.minute / 60.0
+class Root(BoxLayout):
+    """Simple vertical box with two time labels (demo)."""
+    pass
 
-    def _update_hands(self, *_):
-        inset = dp(6)
-        d = max(0.0, min(self.width, self.height) - 2 * inset)
-        if d <= 0:
-            return
-        cx, cy = self.center
-        radius = d / 2.0
-
-        a_h = 2 * pi * (self.hour / 12.0)
-        a_m = 2 * pi * (self.minute / 60.0)
-        a_s = 2 * pi * (self.second / 60.0)
-
-        hx = cx + 0.50 * radius * sin(a_h)
-        hy = cy + 0.50 * radius * cos(a_h)
-        mx = cx + 0.75 * radius * sin(a_m)
-        my = cy + 0.75 * radius * cos(a_m)
-        sx = cx + 0.85 * radius * sin(a_s)
-        sy = cy + 0.85 * radius * cos(a_s)
-
-        self._hour_hand.points = [cx, cy, hx, hy]
-        self._minute_hand.points = [cx, cy, mx, my]
-        self._second_hand.points = [cx, cy, sx, sy]
-
-# ---- App ----
 class DualClocksApp(App):
+    title = "Dual Clocks (Demo with Crash Popup)"
+
     def build(self):
-        # Root vertical: top bar + content
-        root = BoxLayout(orientation='vertical')
+        # Log where last_crash.txt will be written
+        Logger.info(f"UserDataDir: {self.user_data_dir}")
 
-        # Top bar with some internal padding so X isn’t under the status bar
-        top_bar = AnchorLayout(anchor_x='right', anchor_y='top',
-                               size_hint=(1, None), height=dp(56))
-        top_inner = BoxLayout(size_hint=(1, 1), padding=[0, dp(8), dp(8), 0])
-        close_button = Button(text='X', size_hint=(None, None), size=(dp(40), dp(40)))
-        close_button.bind(on_release=lambda *_: App.get_running_app().stop())
-        right_holder = AnchorLayout(anchor_x='right', anchor_y='top')
-        right_holder.add_widget(close_button)
-        top_inner.add_widget(right_holder)
-        top_bar.add_widget(top_inner)
+        root = Root(orientation="vertical", padding=16, spacing=12)
 
-        # Content container – we rebuild into landscape/portrait AFTER first frame
-        self.content = BoxLayout(orientation='vertical', size_hint=(1, 1))
+        self.lbl_sf = Label(text="San Francisco: --:--:--", color=(0, 0, 0, 1), font_size="24sp", halign="center")
+        self.lbl_ldn = Label(text="London: --:--:--", color=(0, 0, 0, 1), font_size="24sp", halign="center")
+        self.lbl_diff = Label(text="Δ Time: -- hours", color=(0, 0, 0, 1), font_size="18sp", halign="center")
 
-        # Make UI pieces
-        self._make_columns()
+        # The Label default size doesn't stretch; make them fill width
+        for lbl in (self.lbl_sf, self.lbl_ldn, self.lbl_diff):
+            lbl.size_hint = (1, None)
+            lbl.height = self._sp_to_px(lbl.font_size) * 1.8 if isinstance(lbl.font_size, (int, float)) else 48
 
-        # Assemble
-        root.add_widget(top_bar)
-        root.add_widget(self.content)
+        root.add_widget(self.lbl_sf)
+        root.add_widget(self.lbl_ldn)
+        root.add_widget(self.lbl_diff)
 
-        # Start timers/labels
-        self._update_diff_label(0)
-        KivyClock.schedule_interval(self._update_diff_label, 1.0)
+        # Update every second
+        Clock.schedule_interval(self.update_times, 1)
 
-        # Defer layout wiring until window is ready (avoids early-creation issues on Android)
-        Clock.schedule_once(self._post_build_init, 0)
+        # Optional: demonstrate a handled exception inside a scheduled callback
+        # Uncomment to see the popup working without crashing the app:
+        # Clock.schedule_once(lambda dt: 1/0, 2)  # divide by zero after 2 sec
 
         return root
 
-    def _post_build_init(self, dt):
-        # Build first layout and then react to size/orientation changes
-        self._rebuild_content()
-        Window.bind(size=lambda *_: self._rebuild_content())
-
-    # Build reusable left/right/center pieces once
-    def _make_columns(self):
-        # LEFT
-        self.left_clock = AnalogClock(
-            tzname="America/Los_Angeles",
-            label="San Francisco",
-            face_color=[1.00, 0.82, 0.60, 1.0],
-            size_hint=(1, 1),
-        )
-        left_initial_label = TZ_TO_FRIENDLY.get(
-            self.left_clock.tzname, friendly_label_from_tz(self.left_clock.tzname)
-        )
-        self.left_spinner = Spinner(
-            text=left_initial_label, values=FRIENDLY_VALUES,
-            size_hint=(1, None), height=dp(36)
-        )
-        self.left_spinner.bind(text=self._on_left_city_change)
-        style_spinner(self.left_spinner)
-        self.left_col = BoxLayout(orientation='vertical', spacing=dp(8))
-        left_anchor = AnchorLayout(anchor_x='center', anchor_y='center')
-        left_anchor.add_widget(self.left_clock)
-        self.left_col.add_widget(left_anchor)
-        self.left_col.add_widget(self.left_spinner)
-
-        # RIGHT
-        self.right_clock = AnalogClock(
-            tzname="Europe/London",
-            label="London",
-            face_color=[0.78, 0.86, 1.00, 1.0],
-            size_hint=(1, 1),
-        )
-        right_initial_label = TZ_TO_FRIENDLY.get(
-            self.right_clock.tzname, friendly_label_from_tz(self.right_clock.tzname)
-        )
-        self.right_spinner = Spinner(
-            text=right_initial_label, values=FRIENDLY_VALUES,
-            size_hint=(1, None), height=dp(36)
-        )
-        self.right_spinner.bind(text=self._on_right_city_change)
-        style_spinner(self.right_spinner)
-        self.right_col = BoxLayout(orientation='vertical', spacing=dp(8))
-        right_anchor = AnchorLayout(anchor_x='center', anchor_y='center')
-        right_anchor.add_widget(self.right_clock)
-        self.right_col.add_widget(right_anchor)
-        self.right_col.add_widget(self.right_spinner)
-
-        # CENTER (diff + arrow)
-        self.center_diff_label = Label(
-            text="", color=BRIGHT_GREEN, font_size='16sp',
-            size_hint=(1, 1), halign='right', valign='middle'
-        )
-        self.center_diff_label.bind(size=lambda lbl, _:
-                                    setattr(lbl, "text_size", (lbl.width, None)))
-        self.center_arrow = ArrowWidget(size_hint=(None, 1), width=dp(42))
-        self.center_box = BoxLayout(orientation='horizontal', size_hint=(None, None),
-                                    height=dp(36), spacing=dp(8), width=dp(150))
-        self.center_box.add_widget(self.center_diff_label)
-        self.center_box.add_widget(self.center_arrow)
-
-        # For landscape we place center_box inside a column to center vertically
-        self.center_col = BoxLayout(orientation='vertical', size_hint=(None, 1), width=dp(150))
-        self.center_col.add_widget(Widget())        # spacer
-        self.center_col.add_widget(self.center_box)
-
-    # Rebuild content when orientation changes
-    def _rebuild_content(self):
-        if not hasattr(self, "content") or self.content is None:
-            return
-        self.content.clear_widgets()
-        w, h = Window.size
-        landscape = w >= h
-
-        if landscape:
-            row = BoxLayout(orientation='horizontal', size_hint=(1, 1),
-                            padding=dp(12), spacing=dp(16))
-            # Keep center fairly narrow so clocks have space
-            self.center_col.width = dp(140)
-            self.center_box.width = dp(140)
-            row.add_widget(self.left_col)
-            row.add_widget(self.center_col)
-            row.add_widget(self.right_col)
-            self.content.add_widget(row)
-        else:
-            col = BoxLayout(orientation='vertical', size_hint=(1, 1),
-                            padding=dp(12), spacing=dp(12))
-            # Portrait: just place the center row between the clocks
-            self.center_box.size_hint = (1, None)
-            self.center_box.width = 0
-            col.add_widget(self.left_col)
-            col.add_widget(self.center_box)
-            col.add_widget(self.right_col)
-            self.content.add_widget(col)
-
-        # Apply compact tweaks
-        self._apply_responsive()
-
-    # Spinner handlers
-    def _on_left_city_change(self, spinner, friendly_label):
-        tz = FRIENDLY_TO_TZ.get(friendly_label)
-        if not tz:
-            return
-        self.left_clock.tzname = tz
-        self.left_clock.label = friendly_label
-        self._update_diff_label(0)
-
-    def _on_right_city_change(self, spinner, friendly_label):
-        tz = FRIENDLY_TO_TZ.get(friendly_label)
-        if not tz:
-            return
-        self.right_clock.tzname = tz
-        self.right_clock.label = friendly_label
-        self._update_diff_label(0)
-
-    # Time difference / arrow
-    def _format_signed_diff_text(self, seconds_b_minus_a: int) -> str:
-        secs = int(seconds_b_minus_a)
-        sign = "+" if secs > 0 else "-" if secs < 0 else ""
-        secs = abs(secs)
-        hours = secs // 3600
-        minutes = (secs % 3600) // 60
-        return f"{sign}{hours} Hours" if minutes == 0 else f"{sign}{hours} Hours {minutes} Minutes"
-
-    def _update_diff_label(self, dt):
-        off_left = _offset_seconds_for_tz(self.left_clock.tzname)
-        off_right = _offset_seconds_for_tz(self.right_clock.tzname)
-        delta = off_right - off_left
-
-        self.center_diff_label.text = self._format_signed_diff_text(delta)
-
-        if delta > 0:
-            self.center_diff_label.color = BRIGHT_GREEN
-            self.center_arrow.color = BRIGHT_GREEN
-            self.center_arrow.direction = 'right'
-            self.center_arrow.opacity = 1.0
-        elif delta < 0:
-            self.center_diff_label.color = BRIGHT_RED
-            self.center_arrow.color = BRIGHT_RED
-            self.center_arrow.direction = 'right'
-            self.center_arrow.opacity = 1.0
-        else:
-            self.center_diff_label.color = DARK_TEXT
-            self.center_arrow.opacity = 0.0
-
-    # Compact tweaks
-    def _apply_responsive(self):
+    def _sp_to_px(self, sp_value):
+        # Helper to approximate label height; avoids importing metrics widely
         try:
-            w, _ = Window.size
-            compact = w <= dp(COMPACT_BREAKPOINT_DP)
-            for sp in (getattr(self, "left_spinner", None), getattr(self, "right_spinner", None)):
-                if sp:
-                    sp.height = dp(34) if compact else dp(36)
-                    sp.font_size = '14sp' if compact else '16sp'
+            from kivy.metrics import sp
+            return sp(sp_value)
+        except Exception:
+            return 24
+
+    def update_times(self, _dt=0):
+        try:
+            sf_tz = get_tz("America/Los_Angeles")
+            ldn_tz = get_tz("Europe/London")
+            now_sf = datetime.now(sf_tz)
+            now_ldn = datetime.now(ldn_tz)
+            self.lbl_sf.text = f"San Francisco: {now_sf:%Y-%m-%d %H:%M:%S} ({now_sf.tzname()})"
+            self.lbl_ldn.text = f"London: {now_ldn:%Y-%m-%d %H:%M:%S} ({now_ldn.tzname()})"
+
+            # Show whole-hour difference (rounded to nearest hour)
+            diff_hours = round((now_ldn - now_sf).total_seconds() / 3600.0)
+            self.lbl_diff.text = f"Δ Time: {diff_hours:+d} hours"
         except Exception as e:
-            Logger.warning(f"Responsive tweak skipped: {e}")
+            # Any error here will also show in the popup via ExceptionManager,
+            # but we log it to be explicit.
+            Logger.exception(f"update_times failed: {e}")
 
 if __name__ == "__main__":
     DualClocksApp().run()
