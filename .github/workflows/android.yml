@@ -24,16 +24,16 @@ jobs:
     timeout-minutes: 120
 
     env:
-      WORKDIR: .              # change if your app lives in a subfolder
+      WORKDIR: .        # change if your app lives in a subfolder (e.g., app)
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: false   # ✅ Option 1: do not write extraheader
-          fetch-depth: 0               # optional, keeps full history if needed
+          persist-credentials: false   # Avoids extraheader write/cleanup warnings
+          fetch-depth: 0
 
-      # Optional cache; okay to remove if you want always-clean builds
+      # Optional cache to speed up some parts of subsequent builds
       - name: Cache .buildozer directory (optional)
         uses: actions/cache@v4
         with:
@@ -48,7 +48,7 @@ jobs:
           test -f buildozer.spec || { echo "ERROR: $WORKDIR/buildozer.spec not found"; exit 1; }
 
       # Debug: show what the runner sees
-      - name: Show workspace and first lines of buildozer.spec
+      - name: Show workspace and first lines of buildozer.spec/main.py
         run: |
           cd "$WORKDIR"
           pwd
@@ -79,19 +79,63 @@ jobs:
           print("buildozer.spec looks OK.")
           PY
 
-      # ---- The build step inside the Dockerized Buildozer action ----
+      # Show installed SDK components before we modify anything (diagnostics)
+      - name: Show installed Android SDK platforms (before)
+        run: |
+          echo "ANDROIDSDK = ${ANDROIDSDK:-<unset>}"
+          if [ -n "${ANDROIDSDK:-}" ] && [ -d "$ANDROIDSDK" ]; then
+            ls -la "$ANDROIDSDK" || true
+            if [ -x "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+              "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROIDSDK" --list | sed -n '1,120p' || true
+              ls -la "$ANDROIDSDK/platforms" || true
+            fi
+          fi
+
+      # ---- Build (installs cmdline-tools if missing, then installs platform 31) ----
       - name: Build with Buildozer (debug)
         uses: ArtemSBulgakov/buildozer-action@v1
         env:
           USER: root
-          PIP_BREAK_SYSTEM_PACKAGES: "1"
+          PIP_BREAK_SYSTEM_PACKAGES: "1"   # allow pip install in managed env (PEP 668)
         with:
-          workdir: .
-          buildozer_version: "1.5.0"      # or "stable"
+          workdir: ${{ env.WORKDIR }}
+          buildozer_version: "1.5.0"       # or "stable" ; set '' to skip installing Buildozer via pip
           command: >
-            yes | $ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager --licenses || true;
-            $ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;34.0.0";
+            set -euxo pipefail;
+
+            # Ensure ANDROIDSDK dir exists
+            mkdir -p "$ANDROIDSDK";
+
+            # Install Android cmdline-tools if not present (for sdkmanager)
+            if [ ! -x "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+              echo "Installing Android cmdline-tools into $ANDROIDSDK/cmdline-tools/latest";
+              mkdir -p "$ANDROIDSDK/cmdline-tools";
+              cd /tmp;
+              curl -sSLo cmdtools.zip "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip";
+              (unzip -q cmdtools.zip || (apt-get update && apt-get install -y unzip && unzip -q cmdtools.zip));
+              mkdir -p "$ANDROIDSDK/cmdline-tools/latest";
+              mv cmdline-tools/* "$ANDROIDSDK/cmdline-tools/latest/";
+            fi;
+
+            # Accept licenses non-interactively
+            yes | "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROIDSDK" --licenses || true;
+
+            # Install the exact components we need for android.api = 31
+            "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROIDSDK" \
+              "platform-tools" "platforms;android-31" "build-tools;34.0.0";
+
+            # Verify installs (diagnostics)
+            "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROIDSDK" --list | sed -n '1,120p' || true;
+            ls -la "$ANDROIDSDK/platforms" || true;
+
+            # Build APK
             buildozer -v android debug
+
+      - name: Show installed Android SDK platforms (after)
+        if: always()
+        run: |
+          "$ANDROIDSDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROIDSDK" --list | sed -n '1,120p' || true
+          ls -la "$ANDROIDSDK/platforms" || true
 
       - name: List build artifacts
         run: |
@@ -109,7 +153,7 @@ jobs:
           ver = c.get("app", "version", fallback="0.0.0").strip()
           print("Version:", ver)
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"version={ver}\n")
+            f.write(f"version={ver}\n")
           PY
 
       - name: Rename APK (friendly name)
