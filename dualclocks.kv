@@ -27,7 +27,7 @@
         id: spinner
         text: 'Select City'
         values: ['Los Angeles', 'San Francisco', 'New York', 'London', 'Paris', 'Berlin', 'Dubai', 'Delhi', 'Beijing', 'Tokyo', 'Sydney', 'Auckland', 'Johannesburg', 'São Paulo', 'Honolulu']
-        dropdown_cls: Factory.NoDismissDropDown# <-- Use the class, not a string
+        dropdown_cls: 'NoDismissDropDown'  # <-- Use string name, not Factory
         size_hint_y: None
         height: dp(40)
         font_size: sp(max(16, min(24, Window.width * 0.020)))
