@@ -3,7 +3,7 @@
 #:import sp kivy.metrics.sp
 #:import Window kivy.core.window.Window
 #:import StableSpinner main.StableSpinner
-
+#:import Factory kivy.factory.Factory
 
 <NoDismissDropDown@DropDown>:
     auto_dismiss: False
@@ -27,15 +27,15 @@
         id: spinner
         text: 'Select City'
         values: ['Los Angeles', 'San Francisco', 'New York', 'London', 'Paris', 'Berlin', 'Dubai', 'Delhi', 'Beijing', 'Tokyo', 'Sydney', 'Auckland', 'Johannesburg', 'São Paulo', 'Honolulu']
-        dropdown_cls: 'NoDismissDropDown'   # <- key line
+        dropdown_cls: Factory.NoDismissDropDown# <-- Use the class, not a string
         size_hint_y: None
-        height: dp(40)                      # <- fixed height to avoid relayout while opening
+        height: dp(40)
         font_size: sp(max(16, min(24, Window.width * 0.020)))
         background_normal: ''
         background_color: 0.95, 1.0, 0.95, 1
         color: 0.0, 0.0, 0.5, 1
         option_cls: 'SpinnerOption'
-        on_text: root.set_city(self.text)   # keep only one on_text
+        on_text: root.set_city(self.text)
 
         canvas.after:
             Color:
@@ -44,7 +44,6 @@
                 width: dp(1.2)
                 rectangle: self.x, self.y, self.width, self.height
 
-        # OK to keep font-fitting here if it doesn't change widget size/pos
         on_size: app.fit_spinner_font(self, min_sp=12, max_sp=24)
 
 <SpinnerOption>:
@@ -52,12 +51,7 @@
     size_hint_y: None
     height: dp(40)
 
-
-# Keep SpinnerOption ONLY for styling dropdown options (no layout/content here)
-<SpinnerOption>:
-    font_size: sp(max(16, min(24, Window.width * 0.020)))
-
-# ---- Root layout stays the same ----
+# ---- Root layout unchanged ----
 BoxLayout:
     orientation: 'horizontal'
     padding: dp(16)
