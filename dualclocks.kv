@@ -4,14 +4,16 @@
 #:import Window kivy.core.window.Window
 #:import StableSpinner main.StableSpinner
 
+
+<NoDismissDropDown@DropDown>:
+    auto_dismiss: False
+
 <AnalogClock>:
     size_hint: 1, 1
 
 <ClockPanel>:
     orientation: 'vertical'
     spacing: dp(10)
-
-    # Bind Python properties to these ids (no on_kv_post needed)
     spinner: spinner
     clock: clock
 
@@ -25,15 +27,15 @@
         id: spinner
         text: 'Select City'
         values: ['Los Angeles', 'San Francisco', 'New York', 'London', 'Paris', 'Berlin', 'Dubai', 'Delhi', 'Beijing', 'Tokyo', 'Sydney', 'Auckland', 'Johannesburg', 'São Paulo', 'Honolulu']
+        dropdown_cls: 'NoDismissDropDown'   # <- key line
         size_hint_y: None
-        height: dp(40)  # <- fixed height avoids layout churn during open/selection
+        height: dp(40)                      # <- fixed height to avoid relayout while opening
         font_size: sp(max(16, min(24, Window.width * 0.020)))
         background_normal: ''
         background_color: 0.95, 1.0, 0.95, 1
         color: 0.0, 0.0, 0.5, 1
-        option_cls: 'SpinnerOption'  # <- ensure our styled options are used
-        # Keep one on_text handler (you had two). Avoid calling layout/size computations here.
-        on_text: root.set_city(self.text)
+        option_cls: 'SpinnerOption'
+        on_text: root.set_city(self.text)   # keep only one on_text
 
         canvas.after:
             Color:
@@ -42,8 +44,13 @@
                 width: dp(1.2)
                 rectangle: self.x, self.y, self.width, self.height
 
-        # If app.fit_spinner_font only tweaks font size (not size/pos), you can keep it on on_size:
+        # OK to keep font-fitting here if it doesn't change widget size/pos
         on_size: app.fit_spinner_font(self, min_sp=12, max_sp=24)
+
+<SpinnerOption>:
+    font_size: sp(max(16, min(24, Window.width * 0.020)))
+    size_hint_y: None
+    height: dp(40)
 
 
 # Keep SpinnerOption ONLY for styling dropdown options (no layout/content here)
