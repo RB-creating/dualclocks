@@ -7,6 +7,7 @@ from kivy.config import Config
 Config.set('input', 'mouse', 'mouse,disable_multitouch')  # Disable red dot on click
 from kivy.app import App
 from kivy.clock import Clock
+from kivy.uix.spinner import Spinner
 from kivy.core.window import Window
 from kivy.properties import StringProperty, ObjectProperty, ListProperty, BooleanProperty
 from kivy.uix.boxlayout import BoxLayout
@@ -15,6 +16,12 @@ from kivy.graphics import Color, Ellipse, Line, Rectangle
 from kivy.utils import platform
 from kivy.core.text import Label as CoreLabel
 from kivy.metrics import sp
+
+class StableSpinner(Spinner):
+    """Opens the dropdown on next frame to avoid immediate auto-dismiss on touch devices."""
+    def on_release(self):
+        # Defer the default toggle to the next frame
+        Clock.schedule_once(lambda dt: super(StableSpinner, self).on_release(), 0)
 
 # Make the app background white
 Window.clearcolor = (0.8, 0.8, 0.8, 1)
@@ -175,7 +182,6 @@ class AnalogClock(Widget):
             Color(1, 0, 0, 1)
             x_s, y_s = polar_to_xy(cx, cy, angle_sec, radius * 0.85)
             Line(points=[cx, cy, x_s, y_s], width=1.2)
-
 
 class ClockPanel(BoxLayout):
     spinner = ObjectProperty(None)
