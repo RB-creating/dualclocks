@@ -1,7 +1,10 @@
 name: Android APK
-
 on:
   workflow_dispatch:
+
+# Required so the workflow can create releases and upload assets
+permissions:
+  contents: write
 
 jobs:
   build-android:
@@ -77,15 +80,15 @@ jobs:
             .buildozer/**/logs/**
           if-no-files-found: ignore
 
-      # --- NEW: rename the APK so the inner file has a friendly name ---
+      # Rename the APK so the inner file name is predictable
       - name: Rename APK to dualclocks.apk
         if: success()
         run: |
           set -eux
-          # The Buildozer action exposes the APK path as an output.
+          # The Buildozer action exposes the APK path as an output
           src="${{ steps.buildozer.outputs.filename }}"
 
-          # Fallback: if that path is empty/not a file, grab the first .apk we find.
+          # Fallback: find the first .apk if the output wasn't set
           if [ ! -f "$src" ]; then
             src="$(find . -type f -name "*.apk" | head -n 1)"
           fi
@@ -94,11 +97,36 @@ jobs:
           cp "$src" dualclocks.apk
           ls -l dualclocks.apk
 
-      # --- Upload artifact as 'dualclocks' so the downloaded ZIP is dualclocks.zip ---
+      # Keep the artifact in Actions for convenience (zip named dualclocks.zip)
       - name: Upload APK artifact (dualclocks.zip)
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: dualclocks               # <— this controls the ZIP filename you download
-          path: dualclocks.apk           # <— inside it, the file is dualclocks.apk
+          name: dualclocks
+          path: dualclocks.apk
           if-no-files-found: error
+
+      # ----- NEW: Create a Git tag and GitHub Release, and attach dualclocks.apk -----
+
+      # Pick a tag name & release title (using the workflow run number for uniqueness)
+      - name: Set release variables
+        if: success()
+        id: relvars
+        run: |
+          echo "TAG=v${GITHUB_RUN_NUMBER}" >> $GITHUB_OUTPUT
+          echo "NAME=Android Debug Build #${GITHUB_RUN_NUMBER}" >> $GITHUB_OUTPUT
+
+      # Create / update the release and upload the APK asset
+      - name: Publish GitHub Release with APK
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.relvars.outputs.TAG }}
+          name: ${{ steps.relvars.outputs.NAME }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dualclocks.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
