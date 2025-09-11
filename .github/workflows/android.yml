@@ -77,9 +77,28 @@ jobs:
             .buildozer/**/logs/**
           if-no-files-found: ignore
 
-      - name: Upload APK artifact
+      # --- NEW: rename the APK so the inner file has a friendly name ---
+      - name: Rename APK to dualclocks.apk
+        if: success()
+        run: |
+          set -eux
+          # The Buildozer action exposes the APK path as an output.
+          src="${{ steps.buildozer.outputs.filename }}"
+
+          # Fallback: if that path is empty/not a file, grab the first .apk we find.
+          if [ ! -f "$src" ]; then
+            src="$(find . -type f -name "*.apk" | head -n 1)"
+          fi
+
+          echo "Source APK: $src"
+          cp "$src" dualclocks.apk
+          ls -l dualclocks.apk
+
+      # --- Upload artifact as 'dualclocks' so the downloaded ZIP is dualclocks.zip ---
+      - name: Upload APK artifact (dualclocks.zip)
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: apk
-          path: ${{ steps.buildozer.outputs.filename }}
+          name: dualclocks               # <— this controls the ZIP filename you download
+          path: dualclocks.apk           # <— inside it, the file is dualclocks.apk
+          if-no-files-found: error
