@@ -193,10 +193,9 @@ class ClockPanel(BoxLayout):
     clock = ObjectProperty(None)
 
     def set_city(self, city_name: str):
-        """Update spinner text and the clock's timezone."""
-        self.spinner.text = city_name
-        self.clock.tz_name = CITY_TIMEZONES[city_name]
-
+        """Update only the clock's timezone; Spinner updates its own text."""
+        # Use .get(...) with a safe default to avoid KeyError on any bad text
+        self.clock.tz_name = CITY_TIMEZONES.get(city_name, "America/Los_Angeles")
 
 class DualClockApp(App):
     is_android = BooleanProperty(False)  
@@ -207,18 +206,26 @@ class DualClockApp(App):
         from kivy.properties import ListProperty
         return Builder.load_file("dualclocks.kv")
 
+    
     def on_start(self):
-        # Set default cities (same as you already had)
-        self.root.ids.left_panel.set_city("Los Angeles")
-        self.root.ids.right_panel.set_city("London")
+        # Grab panels
+        left = self.root.ids.left_panel
+        right = self.root.ids.right_panel
 
-        # Set the clock face colors AFTER the UI is built (safe place to do it)
-        self.root.ids.left_panel.ids.clock.face_color = (1.0, 0.95, 0.85, 1)  # very light orange
-        self.root.ids.right_panel.ids.clock.face_color = (0.85, 0.92, 1.0, 1)  # light blue
+        # 1) Initialize spinners to real cities.
+        #    This will trigger the KV binding `on_text: root.set_city(self.text)`
+        #    which updates each clock's tz_name automatically.
+        left.ids.spinner.text = "Los Angeles"
+        right.ids.spinner.text = "London"
 
-        # Keep your delta updates
+        # 2) Set the clock face colors AFTER the widgets exist
+        left.ids.clock.face_color = (1.0, 0.95, 0.85, 1)   # very light orange
+        right.ids.clock.face_color = (0.85, 0.92, 1.0, 1)  # light blue
+
+        # 3) Start + run one immediate update
         Clock.schedule_interval(self.update_delta, 1)
         self.update_delta(0)
+
         
     def request_close(self):              # <-- ADD
         """Close the app (works on Android and desktop)."""
@@ -226,41 +233,37 @@ class DualClockApp(App):
         self.stop()
 
     def update_delta(self, dt):
-        left_city = self.root.ids.left_panel.spinner.text
-        right_city = self.root.ids.right_panel.spinner.text
-        tz_left = CITY_TIMEZONES[left_city]
-        tz_right = CITY_TIMEZONES[right_city]
+        left_city = self.root.ids.left_panel.ids.spinner.text
+        right_city = self.root.ids.right_panel.ids.spinner.text
+
+        # Fallbacks if text is invalid (e.g., 'Select City')
+        tz_left = CITY_TIMEZONES.get(left_city, "America/Los_Angeles")
+        tz_right = CITY_TIMEZONES.get(right_city, "Europe/London")
 
         diff = hours_diff_between(tz_left, tz_right)  # RIGHT - LEFT in hours
         sign = "+" if diff >= 0 else "-"
-       
         text = f"{sign}{fmt_hours(abs(diff))} Hours ->"
         self.root.ids.delta_label.text = text
 
-        # Set color based on sign
         if diff >= 0:
             self.root.ids.delta_label.color = (0.2, 0.6, 0.2, 1)  # light green
         else:
             self.root.ids.delta_label.color = (0.8, 0.3, 0.3, 1)  # light red
 
+
     def fit_spinner_font(self, spn, min_sp=12, max_sp=24, padding=16):
-        """
-        Shrink spinner font so the text fits within its width.
-        min_sp / max_sp are in 'sp' units; we convert to pixels.
-        """
+        # Avoid layout churn while the dropdown is open (can close it on Android)
         if getattr(spn, 'is_open', False):
             return
-        # Target drawable width (account for a bit of horizontal padding)
+
         target_w = max(0, spn.width - padding)
         if target_w <= 0 or not spn.text:
             return
 
-        # Convert sp -> pixels for CoreLabel
+        from kivy.core.text import Label as CoreLabel
         lo = sp(min_sp)
         hi = sp(max_sp)
         best = lo
-
-        # Binary search for the largest font that fits
         while lo <= hi:
             mid = (lo + hi) / 2.0
             lbl = CoreLabel(text=spn.text, font_size=mid)
@@ -272,11 +275,11 @@ class DualClockApp(App):
             else:
                 hi = mid - 0.5
 
-        # Apply and keep it centered
-        spn.font_size = best          # pixels are fine here
+        spn.font_size = best
         spn.text_size = (spn.width, None)
         spn.halign = 'center'
         spn.valign = 'middle'
+
 
 if __name__ == "__main__":
     DualClockApp().run()
