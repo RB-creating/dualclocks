@@ -22,8 +22,7 @@ from kivy.utils import platform
 from kivy.core.text import Label as CoreLabel
 from kivy.metrics import sp
 from kivy.logger import Logger
-
-
+                      # don't cover the entire screen
 def setup_spinner(spinner):
     # Add logs so we can see what happens
     spinner.bind(
