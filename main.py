@@ -1,10 +1,15 @@
 # main.py
+# --- Desktop-only mouse config (must be before other Kivy imports) ---
+import os
+from kivy.config import Config
+is_android_env = ('ANDROID_ARGUMENT' in os.environ) or ('ANDROID_ROOT' in os.environ)
+if not is_android_env:
+    Config.set('input', 'mouse', 'mouse,disable_multitouch')  # Disable red dot on desktop
+
 from datetime import datetime, timezone
 from math import sin, cos, radians, pi
 from zoneinfo import ZoneInfo
 
-from kivy.config import Config
-Config.set('input', 'mouse', 'mouse,disable_multitouch')  # Disable red dot on click
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.uix.spinner import Spinner
@@ -243,6 +248,8 @@ class DualClockApp(App):
         Shrink spinner font so the text fits within its width.
         min_sp / max_sp are in 'sp' units; we convert to pixels.
         """
+        if getattr(spn, 'is_open', False):
+            return
         # Target drawable width (account for a bit of horizontal padding)
         target_w = max(0, spn.width - padding)
         if target_w <= 0 or not spn.text:
