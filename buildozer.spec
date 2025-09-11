@@ -29,7 +29,7 @@ orientation = portrait
 fullscreen = 0
 
 # Easier to capture Python errors in logcat
-android.logcat_filters = *:S python:D
+android.logcat_filters = *:S python:D kivy:D
 
 [buildozer]
 log_level = 2
