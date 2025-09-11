@@ -21,6 +21,33 @@ from kivy.graphics import Color, Ellipse, Line, Rectangle
 from kivy.utils import platform
 from kivy.core.text import Label as CoreLabel
 from kivy.metrics import sp
+from kivy.logger import Logger
+
+
+def setup_spinner(spinner):
+    # Add logs so we can see what happens
+    spinner.bind(
+        on_press=lambda *_: Logger.info("SPINNER: on_press"),
+        on_open=lambda *_: Logger.info("SPINNER: on_open"),
+        on_release=lambda *_: Logger.info("SPINNER: on_release"),
+        on_text=lambda inst, txt: Logger.info(f"SPINNER: selected -> {txt}")
+    )
+
+    # When the dropdown opens, stop it from auto-closing
+    def _on_open(*_):
+        dd = spinner.dropdown
+        if not dd:
+            return
+        dd.auto_dismiss = False  # <-- This is the key fix
+        # Make sure selecting an item closes the dropdown
+        def _on_select(dropdown, val):
+            spinner.text = val
+            dropdown.dismiss()
+        dd.unbind(on_select=_on_select)  # avoid duplicates
+        dd.bind(on_select=_on_select)
+
+    spinner.bind(on_open=_on_open)
+
 
 class StableSpinner(Spinner):
     """Opens the dropdown on next frame to avoid immediate auto-dismiss on touch devices."""
@@ -217,6 +244,10 @@ class DualClockApp(App):
         #    which updates each clock's tz_name automatically.
         left.ids.spinner.text = "Los Angeles"
         right.ids.spinner.text = "London"
+
+
+        setup_spinner(left.ids.spinner)
+        setup_spinner(right.ids.spinner)
 
         # 2) Set the clock face colors AFTER the widgets exist
         left.ids.clock.face_color = (1.0, 0.95, 0.85, 1)   # very light orange
