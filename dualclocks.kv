@@ -5,6 +5,11 @@
 #:import StableSpinner main.StableSpinner
 #:import Factory kivy.factory.Factory
 
+<WideDropDown@DropDown>:
+    auto_width: False
+    width: min(Window.width * 0.92, dp(420))   # menu up to ~92% of the screen, capped at 420dp
+    max_height: dp(320)                        # don't cover the entire screen
+
 #<NoDismissDropDown@DropDown>:
 #   auto_dismiss: False
 
@@ -26,8 +31,11 @@
     StableSpinner:
         id: spinner
         text: 'Select City'
-        values: ['Los Angeles', 'San Francisco', 'New York', 'London', 'Paris', 'Berlin', 'Dubai', 'Delhi', 'Beijing', 'Tokyo', 'Sydney', 'Auckland', 'Johannesburg', 'São Paulo', 'Honolulu']
-        #dropdown_cls: 'NoDismissDropDown'  # <-- Use string name, not Factory
+        values: ['Los Angeles','San Francisco','New York','London','Paris','Berlin','Dubai','Delhi','Beijing','Tokyo','Sydney','Auckland','Johannesburg','São Paulo','Honolulu']
+
+        # NEW: use the wider dropdown
+        dropdown_cls: 'WideDropDown'
+
         size_hint_y: None
         height: dp(40)
         font_size: sp(max(16, min(24, Window.width * 0.020)))
@@ -35,22 +43,29 @@
         background_color: 0.95, 1.0, 0.95, 1
         color: 0.0, 0.0, 0.5, 1
         option_cls: 'SpinnerOption'
-        on_text: root.set_city(self.text)
 
-        canvas.after:
-            Color:
-                rgba: self.color
-            Line:
-                width: dp(1.2)
-                rectangle: self.x, self.y, self.width, self.height
+        # Refit the button's text whenever selection changes (auto-scale font)
+        on_text:
+            root.set_city(self.text)
+            app.fit_spinner_font(self, 12, 24)
 
+        # Help ellipsize gracefully only if needed after scaling
+        shorten: True
+        shorten_from: 'right'
+        text_size: self.width - dp(16), None
+
+        # Keep refitting on size changes (you already had this)
         on_size: app.fit_spinner_font(self, min_sp=12, max_sp=24)
+
 
 <SpinnerOption>:
     font_size: sp(max(16, min(24, Window.width * 0.020)))
     size_hint_y: None
-    height: dp(40)
-
+    height: dp(44)
+    padding: dp(12), 0
+    halign: 'left'
+    valign: 'middle'
+    text_size: self.width - dp(24), None
 # ---- Root layout unchanged ----
 BoxLayout:
     orientation: 'horizontal'
