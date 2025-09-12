@@ -80,31 +80,26 @@ jobs:
             .buildozer/**/logs/**
           if-no-files-found: ignore
 
-      # Rename the APK so the inner file name is predictable
-      - name: Rename APK to dualclocks.apk
-        if: success()
-        run: |
-          set -eux
-          # The Buildozer action exposes the APK path as an output
-          src="${{ steps.buildozer.outputs.filename }}"
+   # ✅ Rename the APK and upload as artifact
+- name: Rename APK
+  if: success()
+  run: |
+    mkdir -p $GITHUB_WORKSPACE/output
+    src="${{ steps.buildozer.outputs.filename }}"
+    if [ ! -f "$src" ]; then
+      src="$(find . -type f -name "*.apk" | head -n 1)"
+    fi
+    echo "Source APK: $src"
+    cp "$src" $GITHUB_WORKSPACE/output/dualclocks.apk
+    ls -l $GITHUB_WORKSPACE/output/dualclocks.apk
 
-          # Fallback: find the first .apk if the output wasn't set
-          if [ ! -f "$src" ]; then
-            src="$(find . -type f -name "*.apk" | head -n 1)"
-          fi
+- name: Upload APK as artifact
+  if: success()
+  uses: actions/upload-artifact@v4
+  with:
+    name: dualclocks-apk
+    path: $GITHUB_WORKSPACE/output/dualclocks.apk
 
-          echo "Source APK: $src"
-          cp "$src" dualclocks.apk
-          ls -l dualclocks.apk
-
-      # Keep the artifact in Actions for convenience (zip named dualclocks.zip)
-      - name: Upload APK artifact (dualclocks.zip)
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dualclocks
-          path: dualclocks.apk
-          if-no-files-found: error
 
       # ----- NEW: Create a Git tag and GitHub Release, and attach dualclocks.apk -----
 
