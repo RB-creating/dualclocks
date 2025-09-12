@@ -81,6 +81,17 @@ jobs:
             .buildozer/**/logs/**
           if-no-files-found: ignore
 
+      - name: Fix workspace permissions (root-owned files from Buildozer)
+        if: always()
+        run: |
+          echo "Before:"
+          ls -ld "$GITHUB_WORKSPACE" || true
+          # Reset ownership of the entire workspace back to the runner user
+          sudo chown -R $USER:$USER "$GITHUB_WORKSPACE"
+          echo "After:"
+          ls -ld "$GITHUB_WORKSPACE"
+
+
       # ✅ Collect the APK into a known location
       - name: Rename APK
         if: success()
