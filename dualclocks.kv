@@ -19,7 +19,6 @@
 <ClockPanel>:
     orientation: 'vertical'
     spacing: dp(10)
-    spinner: spinner
     clock: clock
 
     AnchorLayout:
@@ -27,36 +26,6 @@
         anchor_y: 'center'
         AnalogClock:
             id: clock
-
-    StableSpinner:
-        id: spinner
-        text: 'Select City'
-        values: ['Los Angeles','San Francisco','New York','London','Paris','Berlin','Dubai','Delhi','Beijing','Tokyo','Sydney','Auckland','Johannesburg','São Paulo','Honolulu']
-
-        # NEW: use the wider dropdown
-        dropdown_cls: 'WideDropDown'
-
-        size_hint_y: None
-        height: dp(40)
-        font_size: sp(max(16, min(24, Window.width * 0.020)))
-        background_normal: ''
-        background_color: 0.95, 1.0, 0.95, 1
-        color: 0.0, 0.0, 0.5, 1
-        option_cls: 'SpinnerOption'
-
-        # Refit the button's text whenever selection changes (auto-scale font)
-        on_text:
-            root.set_city(self.text)
-            app.fit_spinner_font(self, 12, 24)
-
-        # Help ellipsize gracefully only if needed after scaling
-        shorten: True
-        shorten_from: 'right'
-        text_size: self.width - dp(16), None
-
-        # Keep refitting on size changes (you already had this)
-        on_size: app.fit_spinner_font(self, min_sp=12, max_sp=24)
-
 
 <SpinnerOption>:
     font_size: sp(max(16, min(24, Window.width * 0.020)))
@@ -67,51 +36,136 @@
     valign: 'middle'
     text_size: self.width - dp(24), None
 # ---- Root layout unchanged ----
-BoxLayout:
-    orientation: 'horizontal'
-    padding: dp(16)
-    spacing: dp(24)
-
-    ClockPanel:
-        id: left_panel
-
+# ---- Root layout replaced to move × to top-right ----
+# ---- Root layout: two wide clocks + overlays for close and delta ----
+# ---- Root layout: two wide clocks + top-right close + bottom delta bar ----
+# ---- Root layout: top delta bar + two wide clocks; close button at top-right ----
+# ---- Root layout: clocks (top) -> delta bar (middle) -> spinners (bottom) ----
+FloatLayout:
+    # Main vertical stack for content (so nothing overlaps)
     BoxLayout:
         orientation: 'vertical'
-        size_hint_x: None
-        width: dp(140)
+        size_hint: 1, 1
+        padding: dp(8)
         spacing: dp(8)
-        padding: [0, 0]
+        pos_hint: {'x': 0, 'y': 0}
+
+        # 1) CLOCKS AREA: two panels side-by-side
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(12)
+            size_hint_y: 1
+
+            ClockPanel:
+                id: left_panel
+
+            ClockPanel:
+                id: right_panel
+
+        # 2) DELTA BAR: sits just above the spinners
+        BoxLayout:
+            id: delta_bar
+            orientation: 'horizontal'
+            size_hint_y: None
+            height: dp(32)  # adjust 28–40dp to taste
+            padding: dp(8), 0
+
+            Label:
+                id: delta_label
+                text: ''
+                color: 0, 0, 0, 1
+                font_size: sp(max(18, min(28, Window.width * 0.025)))
+                halign: 'center'
+                valign: 'middle'
+                size_hint: 1, 1
+                text_size: self.width, self.height
+                max_lines: 1
+                shorten: True
+                shorten_from: 'center'
+
+        # 3) SPINNERS ROW: two spinners side-by-side (moved out of ClockPanel)
+        # 3) SPINNERS ROW: two spinners side-by-side (the ONLY spinners)
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(12)
+            size_hint_y: None
+            height: dp(56)  # row height; each spinner is 48dp tall
+
+            # LEFT spinner
+            StableSpinner:
+                id: left_spinner
+                text: 'Los Angeles'
+                values: ['Los Angeles','San Francisco','New York','London','Paris','Berlin','Dubai','Delhi','Beijing','Tokyo','Sydney','Auckland','Johannesburg','São Paulo','Honolulu']
+                dropdown_cls: 'WideDropDown'
+
+                size_hint_y: None
+                height: dp(48)
+                padding: [dp(12), dp(8)]
+                text_size: self.width - dp(16), self.height
+                halign: 'center'
+                valign: 'middle'
+
+                font_size: sp(max(16, min(24, Window.width * 0.020)))
+                background_normal: ''
+                background_color: 0.98, 0.98, 0.98, 1
+                color: 0.0, 0.0, 0.5, 1
+                option_cls: 'SpinnerOption'
+
+                on_text:
+                    left_panel.set_city(self.text)
+                    app.fit_spinner_font(self, 12, 24)
+
+                shorten: True
+                shorten_from: 'right'
+                on_size: app.fit_spinner_font(self, min_sp=12, max_sp=24)
+
+            # RIGHT spinner
+            StableSpinner:
+                id: right_spinner
+                text: 'London'
+                values: ['Los Angeles','San Francisco','New York','London','Paris','Berlin','Dubai','Delhi','Beijing','Tokyo','Sydney','Auckland','Johannesburg','São Paulo','Honolulu']
+                dropdown_cls: 'WideDropDown'
+
+                size_hint_y: None
+                height: dp(48)
+                padding: [dp(12), dp(8)]
+                text_size: self.width - dp(16), self.height
+                halign: 'center'
+                valign: 'middle'
+
+                font_size: sp(max(16, min(24, Window.width * 0.020)))
+                background_normal: ''
+                background_color: 0.98, 0.98, 0.98, 1
+                color: 0.0, 0.0, 0.5, 1
+                option_cls: 'SpinnerOption'
+
+                on_text:
+                    right_panel.set_city(self.text)
+                    app.fit_spinner_font(self, 12, 24)
+
+                shorten: True
+                shorten_from: 'right'
+                on_size: app.fit_spinner_font(self, min_sp=12, max_sp=24)
+
+
+    # Overlay × button fixed at the top-right (doesn't affect layout)
+    AnchorLayout:
+        anchor_x: 'right'
+        anchor_y: 'top'
+        size_hint: 1, 1
+        padding: dp(8)
 
         Button:
             text: '×'
-            size_hint_y: None
-            height: dp(28)
-            size_hint_x: None
-            width: dp(28)
+            size_hint: None, None
+            size: dp(32), dp(32)
             font_size: '16sp'
             background_normal: ''
-            background_color: 1, 0.9, 0.9, 1
-            color: 0.4, 0, 0, 1
-            opacity: 1 if app.is_android else 0
-            disabled: not app.is_android
+            background_color: 0.95, 0.95, 0.95, 1
+            color: 0.2, 0.2, 0.2, 1
+            opacity: 1
+            disabled: False
             on_release: app.request_close()
 
-        Widget:
-            size_hint_y: 1
 
-        Label:
-            id: delta_label
-            text: ''
-            color: 0, 0, 0, 1
-            font_size: sp(max(18, min(28, Window.width * 0.025)))
-            halign: 'center'
-            valign: 'middle'
-            text_size: self.width, None
-            max_lines: 1
-            shorten: True
-            shorten_from: 'center'
-            size_hint_y: None
-            height: dp(30)
 
-    ClockPanel:
-        id: right_panel
