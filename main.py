@@ -234,45 +234,47 @@ class DualClockApp(App):
 
     
     def on_start(self):
-        # Grab panels
+    # Panels and NEW bottom-row spinners
         left = self.root.ids.left_panel
         right = self.root.ids.right_panel
+        ls = self.root.ids.left_spinner      # bottom-row spinner (left)
+        rs = self.root.ids.right_spinner     # bottom-row spinner (right)
 
-        # 1) Initialize spinners to real cities.
-        #    This will trigger the KV binding `on_text: root.set_city(self.text)`
-        #    which updates each clock's tz_name automatically.
-        left.ids.spinner.text = "Los Angeles"
-        right.ids.spinner.text = "London"
+        # Initialize dropdown behavior
+        setup_spinner(ls)
+        setup_spinner(rs)
 
+        # Make sure clocks pick up the initial selections
+        left.set_city(ls.text)
+        right.set_city(rs.text)
 
-        setup_spinner(left.ids.spinner)
-        setup_spinner(right.ids.spinner)
+        # Fit spinner text after layout settles
+        Clock.schedule_once(lambda dt: self.fit_spinner_font(ls), 0)
+        Clock.schedule_once(lambda dt: self.fit_spinner_font(rs), 0)
 
-        # 2) Set the clock face colors AFTER the widgets exist
+        # Clock face colors
         left.ids.clock.face_color = (1.0, 0.95, 0.85, 1)   # very light orange
         right.ids.clock.face_color = (0.85, 0.92, 1.0, 1)  # light blue
 
-        # 3) Start + run one immediate update
+        # Start + run one immediate delta update
         Clock.schedule_interval(self.update_delta, 1)
         self.update_delta(0)
-
         
     def request_close(self):              # <-- ADD
         """Close the app (works on Android and desktop)."""
         # Simple and reliable:
         self.stop()
 
-    def update_delta(self, dt):
-        left_city = self.root.ids.left_panel.ids.spinner.text
-        right_city = self.root.ids.right_panel.ids.spinner.text
-
+    def update_delta(self, dt):    
+        left_city = self.root.ids.left_spinner.text
+        right_city = self.root.ids.right_spinner.text
         # Fallbacks if text is invalid (e.g., 'Select City')
         tz_left = CITY_TIMEZONES.get(left_city, "America/Los_Angeles")
         tz_right = CITY_TIMEZONES.get(right_city, "Europe/London")
 
         diff = hours_diff_between(tz_left, tz_right)  # RIGHT - LEFT in hours
         sign = "+" if diff >= 0 else "-"
-        text = f"{sign}{fmt_hours(abs(diff))} Hours ->"
+        text = f"{sign}{fmt_hours(abs(diff))} hr->"
         self.root.ids.delta_label.text = text
 
         if diff >= 0:
